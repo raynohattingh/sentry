@@ -1,0 +1,36 @@
+services:
+  sentry-brain:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: sentry_brain
+    
+    # CRITICAL: Enables GPU Access
+    runtime: nvidia
+    
+    # Restart Policy: If it crashes, bring it back up (Req #15)
+    restart: unless-stopped
+    
+    # Network: Expose the Flask stream
+    ports:
+      - "5000:5000"
+    
+    # Hardware Access
+    # We use 'privileged' for development to access all USBs easily.
+    # For production, we will map specific devices.
+    privileged: true
+    devices:
+      # Map the EasyCap (Video)
+      - "/dev/video0:/dev/video0"
+      # Map the Arduino (Serial) - Update this if it's ttyACM0!
+      - "/dev/ttyUSB0:/dev/ttyUSB0"
+      
+    # Map code directory so you can edit code on host and it updates in container
+    # (Remove this line for final "Production" deployment)
+    volumes:
+      - ../src:/app/src
+
+    # Environment Config
+    environment:
+      - SERIAL_PORT=/dev/ttyUSB0
+      - FLASK_ENV=development
