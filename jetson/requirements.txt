@@ -1,0 +1,4 @@
+flask
+pyserial
+# opencv-python is usually in the base, but we add it just in case
+# ultralytics is in the base
