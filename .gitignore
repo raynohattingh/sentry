@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Runtime-generated files (do not commit)
+jetson/src/state/*.json
+jetson/logs/
+*.jsonl
+
+# Model files (large binary)
+*.engine
+*.onnx
+*.pt
+*.torchscript
+
+# Environment
+.env
+.env.*
+*.env
+
+# Docker
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Node (if any tooling added)
+node_modules/

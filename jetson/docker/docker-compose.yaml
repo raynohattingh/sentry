@@ -8,7 +8,7 @@ services:
     # CRITICAL: Enables GPU Access
     runtime: nvidia
     
-    # Restart Policy: If it crashes, bring it back up (Req #15)
+    # Restart Policy: If it crashes, bring it back up
     restart: unless-stopped
     
     # Network: Expose the Flask stream
@@ -17,20 +17,27 @@ services:
     
     # Hardware Access
     # We use 'privileged' for development to access all USBs easily.
-    # For production, we will map specific devices.
     privileged: true
     devices:
-      # Map the EasyCap (Video)
       - "/dev/video0:/dev/video0"
-      # Map the Arduino (Serial) - Update this if it's ttyACM0!
       - "/dev/ttyUSB0:/dev/ttyUSB0"
       
-    # Map code directory so you can edit code on host and it updates in container
-    # (Remove this line for final "Production" deployment)
+    # Map code directory for development
     volumes:
       - ../src:/app/src
+      - sentry_state:/app/state
+      - sentry_logs:/app/logs
 
     # Environment Config
     environment:
       - SERIAL_PORT=/dev/ttyUSB0
       - FLASK_ENV=development
+      - MQTT_BROKER=localhost
+      - MQTT_PORT=1883
+      - MQTT_TOPIC=sentry/telemetry
+      - HUD_USERNAME=sentry
+      - HUD_PASSWORD=changeme
+
+volumes:
+  sentry_state:
+  sentry_logs:
