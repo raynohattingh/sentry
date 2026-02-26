@@ -196,12 +196,13 @@ enum SentryConnectionState { online, reconnecting, offline }
 ```
 SentryConfigProvider (StateNotifierProvider)
   └─► MqttServiceProvider (Provider — singleton service)
-        └─► TelemetryStreamProvider (StreamProvider<TelemetryRecord>)
-              ├─► ThreatMarkersProvider (StateNotifierProvider<Map<int, ThreatMarker>>)
-              │     └─► SelectedMarkerProvider (StateProvider<int?>)
+        └─► TelemetryStreamProvider (StreamProvider<TelemetryRecord>)              [telemetry_provider.dart]
+              ├─► ThreatMarkersProvider (StateNotifierProvider<Map<int, ThreatMarker>>)  [telemetry_provider.dart]
+              │     └─► SelectedMarkerProvider (StateProvider<int?>)               [selection_provider.dart]
               ├─► AlertLogProvider (StreamProvider — drift watch query)
-              ├─► SentryModeProvider (StateProvider<FsmState?>)
-              └─► ConnectionStateProvider (StateProvider<SentryConnectionState>)
+              ├─► SentryModeProvider (StateProvider<FsmState?>)                    [telemetry_provider.dart]
+              └─► ConnectionStateProvider (StateNotifierProvider<SentryConnectionState>)  [connection_provider.dart]
+                    └─► (calls ThreatMarkersNotifier.fadeAll() on offline transition)
 
 LocationServiceProvider (Provider — singleton service)
   └─► UserLocationProvider (StreamProvider<LatLng?>)

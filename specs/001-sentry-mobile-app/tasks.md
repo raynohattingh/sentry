@@ -44,7 +44,7 @@
 - [ ] T016 Define abstract `MqttService` interface in `app/lib/services/mqtt_service.dart` — methods: `connect(SentryConfig)`, `disconnect()`, `publishCommand(ManualCommand)`, `Stream<TelemetryRecord> get telemetryStream`, `Stream<SentryConnectionState> get connectionStream`
 - [ ] T017 [P] Define abstract `LocationService` interface in `app/lib/services/location_service.dart` — methods: `Stream<LatLng?> get locationStream`, `Future<bool> get hasPermission`, `Future<bool> requestPermission()`; static `distanceBetweenMetres(LatLng a, LatLng b)` pure function using Haversine formula
 - [ ] T018 [P] Define abstract `NotificationService` interface in `app/lib/services/notification_service.dart` — methods: `Future<void> initialize()`, `Future<void> showThreatAlert(TelemetryRecord, NotificationPreferences)`, `Future<void> requestPermissions()`
-- [ ] T019 [P] Define `SecureStorageService` in `app/lib/services/secure_storage_service.dart` — concrete class wrapping `flutter_secure_storage`; `saveMqttCredentials()`, `loadMqttCredentials()`, `saveVideoCredentials()`, `loadVideoCredentials()`; uses namespaced keys; no plain-text fallback
+- [ ] T019 [P] Define **abstract** `SecureStorageService` interface in `app/lib/services/secure_storage_service.dart` — declare: `saveMqttCredentials(String user, String pass)`, `loadMqttCredentials()→(String,String)?`, `saveVideoCredentials(String user, String pass)`, `loadVideoCredentials()→(String,String)?`; no implementation body; follows the same abstract-interface pattern as `MqttService` and `LocationService`
 - [ ] T020 Create `app/lib/database/app_database.dart` — drift `AppDatabase` with `AlertLog` table matching schema in data-model.md; `timestamp_utc` column indexed; `@DriftDatabase` annotation; generate with `dart run build_runner build`
 - [ ] T021 Create `app/lib/database/alert_log_dao.dart` — `AlertLogDao` with: `insertEntry()`, `watchAll()` stream, `getByTargetId()` for dot-tap lookup, `deleteOlderThan(DateTime cutoff)` purge method
 - [ ] T022 [P] Create mock service implementations in `app/test/mocks/`: `MockMqttService`, `MockLocationService`, `MockNotificationService` using `mocktail`; expose `StreamController` fields so tests can inject telemetry events
@@ -60,10 +60,12 @@
 
 **Independent Test**: Complete the setup form with valid broker details → app connects and navigates to map home screen. Re-launch the app → setup screen is not shown again; app reconnects automatically.
 
-- [ ] T024 [US5] Implement `SecureStorageServiceImpl` (already defined in T019) filling in `flutter_secure_storage` calls; write to iOS Keychain / Android Keystore; verify with unit test that values round-trip correctly in `app/test/unit/secure_storage_test.dart`
-- [ ] T025 [US5] Implement `SetupNotifier` (`StateNotifier<SentryConfig>`) in `app/lib/features/setup/setup_provider.dart` — load saved config on init, `save(SentryConfig)` persists non-secret fields to `SharedPreferences` and secrets to `SecureStorageService`; `isConfigured` computed from `SentryConfig.isConfigured`
+**⚑ TDD (Constitution II)**: Write test tasks and confirm they FAIL before implementing. T027 must be written and failing before T024–T026.
+
+- [ ] T027 [P] [US5] Unit test `SetupNotifier` in `app/test/unit/setup_provider_test.dart` — assert: missing fields prevent save; valid config persists; port 1883 shows TLS warning; second-launch skips setup flow; `SecureStorageService` calls verified via mock *(write first — will fail until T024–T025 exist)*
+- [ ] T024 [US5] Implement `SecureStorageServiceImpl` in `app/lib/services/secure_storage_service.dart` — concrete implementation of the `SecureStorageService` interface defined in T019; wraps `flutter_secure_storage`; uses namespaced keys (`mqtt_username`, `mqtt_password`, `video_username`, `video_password`); writes to iOS Keychain / Android Keystore; no plain-text fallback
+- [ ] T025 [US5] Implement `SetupNotifier` (`StateNotifier<SentryConfig>`) in `app/lib/features/setup/setup_provider.dart` — load saved config on init, `save(SentryConfig)` persists non-secret fields to `SharedPreferences` and credentials to `SecureStorageServiceImpl`; `isConfigured` computed from `SentryConfig.isConfigured`; add `shared_preferences` to `pubspec.yaml` if not already present
 - [ ] T026 [US5] Build `SetupScreen` in `app/lib/features/setup/setup_screen.dart` — two sections: **MQTT** (host, port defaulting to 8883, username, password, sentry ID) and **Video Stream** (host defaulting to MQTT host, port defaulting to 5000, username, password); all fields mandatory; show inline validation errors; "Connect" CTA calls `SetupNotifier.save()` then navigates to `/`
-- [ ] T027 [P] [US5] Unit test `SetupNotifier` in `app/test/unit/setup_provider_test.dart` — assert: missing fields prevent save; valid config persists; port 1883 shows TLS warning; second-launch skips setup flow
 
 ---
 
@@ -73,10 +75,12 @@
 
 **Independent Test**: Disconnect the MQTT broker while the app is running → "System Offline / Reconnecting" banner appears within 10 s. Reconnect broker → banner disappears and telemetry resumes without user action.
 
+**⚑ TDD (Constitution II)**: T031 must be written and failing before T028–T030.
+
+- [ ] T031 [P] [US8] Unit test `ConnectionStateNotifier` in `app/test/unit/connection_state_test.dart` — assert: heartbeat timer fires `offline` after `kHeartbeatTimeoutSec` (timing assertion: state must change within `kHeartbeatTimeoutSec + 1 s`); incoming telemetry resets timer; `onConnected` callback sets `online`; `onDisconnected` sets `reconnecting`; mock MQTT reconnect completes within 30 s (SC-006) *(write first — will fail until T029 exists)*
 - [ ] T028 [US8] Implement `MqttServiceImpl` in `app/lib/services/mqtt_service.dart` — `mqtt_client` with `MqttServerClient.withPort`, TLS via `SecurityContext.defaultContext`, `onBadCertificate: (_) => false` (strict), `authenticateAs(username, password)`, QoS 1 subscription on `sentry/telemetry`; emit parsed `TelemetryRecord` on `telemetryStream`; emit `SentryConnectionState` changes on `connectionStream`; exponential-backoff auto-reconnect on disconnect
-- [ ] T029 [US8] Implement heartbeat timeout logic in `app/lib/features/map/map_provider.dart` — `ConnectionStateNotifier` (`StateNotifier<SentryConnectionState>`): starts a `Timer(kHeartbeatTimeoutSec)` that fires `offline` if no telemetry received; resets timer on every `TelemetryRecord`; listens to `MqttService.connectionStream` for `reconnecting`/`online` transitions
+- [ ] T029 [US8] Implement `ConnectionStateNotifier` (`StateNotifier<SentryConnectionState>`) in `app/lib/features/map/connection_provider.dart` *(split from map_provider.dart — Constitution I SRP)*: starts a `Timer(kHeartbeatTimeoutSec)` that fires `offline` if no telemetry received; resets timer on every `TelemetryRecord`; listens to `MqttService.connectionStream` for `reconnecting`/`online` transitions; when state → `offline`, calls `ThreatMarkersNotifier.fadeAll()` (H3 fix — FR-004b telemetry-loss path)
 - [ ] T030 [US8] Build `ConnectionStatusBar` widget in `app/lib/features/map/widgets/connection_status_bar.dart` — shows `[MQTT] Reconnecting…` in amber and `[SENTRY] System Offline` in `kColorOffline` when not `online`; disappears when `online`; always rendered above the map in a `Stack`
-- [ ] T031 [P] [US8] Unit test `ConnectionStateNotifier` in `app/test/unit/connection_state_test.dart` — assert: heartbeat timer fires `offline` after timeout; incoming telemetry resets timer; `onConnected` sets `online`; `onDisconnected` sets `reconnecting`
 
 ---
 
@@ -86,19 +90,21 @@
 
 **Independent Test**: Launch app with live MQTT telemetry → map shows sentry marker; HIGH-tier message arrives → red dot appears at correct coordinates within 2 s; sentry enters SEARCH → dot fades immediately, "Last Seen" label appears, dot fully gone after 30 s; tap dot → alert panel opens and scrolls to matching entry.
 
+**⚑ TDD (Constitution II)**: Write T041–T044 and confirm they FAIL before T032–T040.
+
+- [ ] T041 [P] [US1] Unit test `TelemetryRecord.fromJson()` in `app/test/unit/telemetry_parsing_test.dart` — assert: valid full message parses correctly; null `lat`/`lon` permitted; unknown `tier` defaults to `low`; null `velocity_vector` parses to null; null `fsm_state` parses to null; malformed JSON throws `FormatException` *(write first)*
+- [ ] T042 [P] [US1] Unit test `ThreatMarker` lifecycle FSM in `app/test/unit/threat_marker_fsm_test.dart` — assert: SEARCH state triggers `fading`; 30 s elapsed transitions to `removed`; new telemetry on `fading` marker reverts to `active`; distance recalculated on location update; **`offline` connection state triggers `fadeAll()` on all active markers** (FR-004b telemetry-loss path) *(write first)*
+- [ ] T043 [P] [US1] Unit test Haversine distance in `app/test/unit/geo_utils_test.dart` — assert known coordinates produce expected distances within 1 m tolerance; same-point returns 0; null location returns null; **`applyNorthOffset()` test: sentry at origin, offset 90°, target at 0° bearing → appears at 270° corrected** (H1 True North fix) *(write first)*
+- [ ] T044 [P] [US1] Integration test MQTT→provider→map pipeline in `app/test/integration/mqtt_to_map_test.dart` — inject mock `TelemetryRecord` via `MockMqttService` stream controller; assert `ThreatMarkersNotifier` state updates **within 2 s of message injection** (SC-002 timing assertion); assert distance field populated when mock location active; assert mock `offline` event triggers `fadeAll()` on active markers *(write first)*
 - [ ] T032 [US1] Implement `LocationServiceImpl` in `app/lib/services/location_service.dart` — `geolocator` position stream; `requestPermission()` delegates to platform; `hasPermission` getter; `distanceBetweenMetres()` static using `Geolocator.distanceBetween()`
-- [ ] T033 [US1] Implement `TelemetryStreamProvider` (`StreamProvider<TelemetryRecord>`) and `ThreatMarkersNotifier` (`StateNotifier<Map<int, ThreatMarker>>`) in `app/lib/features/map/map_provider.dart` — on each `TelemetryRecord`: upsert marker (update position, tier, `velocityVector`, `fsmState`); trigger fade when `fsmState == FsmState.search`; schedule removal after `kMarkerFadeRemovalSec`; recalculate `distanceToUserM` using `LocationService`
-- [ ] T034 [US1] Implement `SentryModeProvider` (`StateProvider<FsmState?>`) in `app/lib/features/map/map_provider.dart` — updated from every `TelemetryRecord.fsmState`; null when no telemetry received
-- [ ] T035 [US1] Build `MapScreen` scaffold in `app/lib/features/map/map_screen.dart` — `FlutterMap` with `TileLayer` (Stadia Alidade Smooth Dark tiles), `FMTC` store initialised on first run for bounding box cache; `Stack` layout: map → `ThreatMarkerLayer` → `UserLocationLayer` → `SentryModeBadge` → `ConnectionStatusBar` → location-denied banner → collapsible `AlertPanel`
-- [ ] T036 [US1] Build `ThreatMarkerLayer` in `app/lib/features/map/widgets/threat_marker_layer.dart` — `MarkerLayer` consuming `ThreatMarkersNotifier`; each active marker is a coloured dot with optional pulsing glow (HIGH tier); fading markers use `AnimatedOpacity`; `velocityVector` drives `AnimatedPositioned` interpolation between position updates; tapping a marker calls `SelectedMarkerNotifier.select(targetId)`
+- [ ] T033 [US1] Implement `TelemetryStreamProvider` (`StreamProvider<TelemetryRecord>`) and `ThreatMarkersNotifier` (`StateNotifier<Map<int, ThreatMarker>>`) in `app/lib/features/map/telemetry_provider.dart` *(split from map_provider.dart — Constitution I SRP)*: on each `TelemetryRecord` upsert marker (position, tier, `velocityVector`, `fsmState`); trigger fade when `fsmState == FsmState.search`; expose `fadeAll()` method called by `ConnectionStateNotifier` when `offline` state fires (FR-004b telemetry-loss path); schedule removal after `kMarkerFadeRemovalSec`; recalculate `distanceToUserM` using `LocationService`; apply `GeoUtils.applyNorthOffset()` to raw `lat`/`lon` before plotting (FR-021 — see T069)
+- [ ] T034 [US1] Implement `SentryModeProvider` (`StateProvider<FsmState?>`) in `app/lib/features/map/telemetry_provider.dart` — updated from every `TelemetryRecord.fsmState`; null when no telemetry received
+- [ ] T035 [US1] Build `MapScreen` scaffold in `app/lib/features/map/map_screen.dart` — `FlutterMap` with `TileLayer` (Stadia Alidade Smooth Dark tiles), `FMTC` store initialised on first run; `Stack` layout: map → `ThreatMarkerLayer` → `UserLocationLayer` → `SentryModeBadge` → `ConnectionStatusBar` → location-denied banner → collapsible `AlertPanel`
+- [ ] T036 [US1] Build `ThreatMarkerLayer` in `app/lib/features/map/widgets/threat_marker_layer.dart` — `MarkerLayer` consuming `ThreatMarkersNotifier`; dot colour per FR-005 (`kColorLow`/`kColorMed`/`kColorHigh`); dot **size scales by tier** (LOW=12px, MED=16px, HIGH=20px) satisfying the FR-005 MAY clause; HIGH-tier dots pulse via `AnimatedContainer` glow; fading markers use `AnimatedOpacity`; `velocityVector` drives `AnimatedPositioned` interpolation; tapping calls `SelectedMarkerNotifier.select(targetId)`
 - [ ] T037 [US1] Build `UserLocationLayer` in `app/lib/features/map/widgets/user_location_layer.dart` — blue dot from `UserLocationProvider`; hidden when location permission denied
 - [ ] T038 [US1] Build `SentryModeBadge` widget in `app/lib/features/map/widgets/sentry_mode_badge.dart` — reads `SentryModeProvider`; displays `SCAN` / `ACQUIRE` / `TRACK` / `SEARCH` with colour coding (SCAN=grey, TRACK=amber, ACQUIRE=orange, SEARCH=red-pulse); shows `—` when null
 - [ ] T039 [US1] Implement location-denied banner in `app/lib/features/map/map_screen.dart` — persistent `MaterialBanner` (non-blocking) shown when `!LocationService.hasPermission`; message: `"[LOCATION] Position unavailable — distances hidden"`; action button opens app settings via `geolocator`'s `openAppSettings()`
-- [ ] T040 [US1] Implement `SelectedMarkerNotifier` (`StateNotifier<int?>`) in `app/lib/features/map/map_provider.dart` — `select(int targetId)` and `clear()`; `MapScreen` listens: on select, notify `AlertPanel` to scroll and highlight, auto-open panel if collapsed
-- [ ] T041 [P] [US1] Unit test `TelemetryRecord.fromJson()` in `app/test/unit/telemetry_parsing_test.dart` — assert: valid full message parses correctly; null `lat`/`lon` permitted; unknown `tier` defaults to `low`; null `velocity_vector` parses to null; null `fsm_state` parses to null; malformed JSON throws `FormatException`
-- [ ] T042 [P] [US1] Unit test `ThreatMarker` lifecycle FSM in `app/test/unit/threat_marker_fsm_test.dart` — assert: SEARCH state triggers `fading`; 30 s elapsed transitions to `removed`; new telemetry on fading marker reverts to `active`; distance recalculated on location update
-- [ ] T043 [P] [US1] Unit test Haversine distance in `app/test/unit/geo_utils_test.dart` — assert known coordinates produce expected distances within 1 m tolerance; same-point returns 0; null location returns null
-- [ ] T044 [P] [US1] Integration test MQTT→provider→map pipeline in `app/test/integration/mqtt_to_map_test.dart` — inject mock `TelemetryRecord` via `MockMqttService` stream controller; assert `ThreatMarkersNotifier` state updates within one frame; assert distance field populated when mock location active
+- [ ] T040 [US1] Implement `SelectedMarkerNotifier` (`StateNotifier<int?>`) in `app/lib/features/map/selection_provider.dart` *(split from map_provider.dart — Constitution I SRP)*: `select(int targetId)` and `clear()`; `MapScreen` listens: on select, notify `AlertPanel` to scroll and highlight, auto-open panel if collapsed
 
 ---
 
@@ -108,10 +114,12 @@
 
 **Independent Test**: Lock the phone; inject HIGH-tier MQTT message via test broker → device produces full-volume alarm sound and shows lockscreen notification within 3 s. Inject LOW-tier message → no notification. Set MED tier to `silent` in settings → MED message produces no notification.
 
+**⚑ TDD (Constitution II)**: T048 must be written and failing before T045–T047.
+
+- [ ] T048 [P] [US2] Unit test `NotificationPreferences.shouldNotify()` in `app/test/unit/notification_routing_test.dart` — assert: HIGH alarm mode triggers; MED notification mode triggers; LOW silent mode suppresses; score below threshold suppresses regardless of tier; `disabled` mode always suppresses; **manual benchmark target for SC-004**: phone locked, inject HIGH-tier message → lockscreen alarm fires within 3 s *(write first)*
 - [ ] T045 [US2] Implement `NotificationServiceImpl` in `app/lib/services/notification_service.dart` — `flutter_local_notifications` init with Android channel `id: "sentry_threat_high"`, `importance: Importance.max`, `playSound: true`, `audioAttributesUsage: AudioAttributesUsage.alarm`; iOS config with `Critical Alert` request; `showThreatAlert()` builds notification payload from `TelemetryRecord` with tier badge and score; `requestPermissions()` calls platform permission API
 - [ ] T046 [US2] Wire background MQTT → notification pipeline in `app/lib/main.dart` — `flutter_background_service` `onStart` handler subscribes to `MqttService.telemetryStream`; on each record: calls `NotificationService.showThreatAlert()` if `NotificationPreferences.shouldNotify(tier, score)` returns true; background isolate has its own `ProviderContainer`
-- [ ] T047 [US2] Implement `NotificationPreferencesNotifier` (`StateNotifier<NotificationPreferences>`) in `app/lib/features/settings/settings_screen.dart` — loads from `SharedPreferences`; `update()` persists; exposed via `notificationPreferencesProvider`
-- [ ] T048 [P] [US2] Unit test `NotificationPreferences.shouldNotify()` in `app/test/unit/notification_routing_test.dart` — assert: HIGH alarm mode triggers; MED notification mode triggers; LOW silent mode suppresses; score below threshold suppresses regardless of tier; `disabled` mode always suppresses
+- [ ] T047 [US2] Implement `NotificationPreferencesNotifier` (`StateNotifier<NotificationPreferences>`) in `app/lib/features/settings/settings_provider.dart` *(not `settings_screen.dart` — Constitution I SRP)*: loads from `SharedPreferences`; `update()` persists; exposed via `notificationPreferencesProvider`
 
 ---
 
@@ -121,11 +129,13 @@
 
 **Independent Test**: Simulate 5 MQTT messages of mixed tiers → all 5 appear in panel in reverse-chronological order. Kill and relaunch app → entries still present. Set retention to 1 day; inject an entry with a timestamp 2 days old → it is absent on next foreground. Tap a HIGH dot → panel opens and scrolls to its entry.
 
+**⚑ TDD (Constitution II)**: T053 must be written and failing before T049–T052.
+
+- [ ] T053 [P] [US4] Unit test `AlertLogDao` purge in `app/test/unit/alert_purge_test.dart` — insert entries with timestamps spanning 40 days; call `deleteOlderThan(now - 7 days)`; assert only entries within 7 days remain; assert `watchAll()` stream emits updated list *(write first)*
 - [ ] T049 [US4] Implement `AlertsNotifier` (`StateNotifier` backed by drift watch stream) in `app/lib/features/alerts/alerts_provider.dart` — subscribes to `AlertLogDao.watchAll()`; on each `TelemetryRecord` inserts via `AlertLogDao.insertEntry()`; triggers `purgeOldEntries()` when app comes to foreground (using `AppLifecycleListener`)
 - [ ] T050 [US4] Build collapsible `AlertPanel` in `app/lib/features/alerts/alert_panel.dart` — `AnimatedContainer` slide-in from right (or bottom on narrow screens); collapse toggle button on map edge; `ListView.builder` rendering `AlertLogEntryTile` items
-- [ ] T051 [US4] Build `AlertLogEntryTile` in `app/lib/features/alerts/alert_panel.dart` — prominent row: tier colour badge, threat score (large), distance to user, timestamp; secondary row (smaller, muted): `pan_angle`, `tilt_angle`, `lrf_distance_m`, `session_id`; highlighted background when `targetId` matches `SelectedMarkerNotifier`; `onTap` calls `SelectedMarkerNotifier.select()`
+- [ ] T051 [US4] Build `AlertLogEntryTile` in `app/lib/features/alerts/alert_panel.dart` — prominent row: tier colour badge, threat score (large), distance to user (display `"Location Unknown"` literal string when `lat`/`lon` are null — FR-025), timestamp; secondary row (smaller, muted): `pan_angle`, `tilt_angle`, `lrf_distance_m`, `session_id`; highlighted background when `targetId` matches `SelectedMarkerNotifier`; `onTap` calls `SelectedMarkerNotifier.select()`
 - [ ] T052 [US4] Implement `ScrollToSelected` logic in `app/lib/features/alerts/alert_panel.dart` — `AlertsNotifier` listens to `SelectedMarkerNotifier`; when selection changes, `ScrollController.animateTo()` to matching entry index; if panel collapsed, calls panel open callback
-- [ ] T053 [P] [US4] Unit test `AlertLogDao` purge in `app/test/unit/alert_purge_test.dart` — insert entries with timestamps spanning 40 days; call `deleteOlderThan(now - 7 days)`; assert only entries within 7 days remain; assert `watchAll()` stream emits updated list
 
 ---
 
@@ -159,9 +169,11 @@
 
 **Independent Test**: Open override screen with sentry online; drag joystick → MQTT inspector shows `sentry/command` messages at ~10 Hz with non-zero velocities. Release → single zero-velocity command published. Disconnect sentry → joystick becomes disabled. Exit screen → zero-velocity stop command published.
 
+**⚑ TDD (Constitution II)**: T062 must be written and failing before T060–T061.
+
+- [ ] T062 [P] [US7] Unit test joystick velocity in `app/test/unit/joystick_test.dart` — assert: delta normalisation produces correct velocity; values clamped to `kMaxJoystickVelocity`; `ManualCommand.zero()` has both velocities == 0.0; `ManualCommand.toJson()` matches schema in contracts/mqtt-command-outbound.md *(write first)*
 - [ ] T060 [US7] Build `JoystickWidget` in `app/lib/features/override/joystick_widget.dart` — `GestureDetector` tracking `onPanUpdate`; normalise delta to `(panVelocity, tiltVelocity)` in steps/sec, clamped to `kMaxJoystickVelocity`; expose `ValueNotifier<ManualCommand>`; visual: outer ring + inner movable nub with `AnimatedPositioned`; snaps to centre on release
 - [ ] T061 [US7] Build `OverrideScreen` in `app/lib/features/override/override_screen.dart` — `JoystickWidget` centred on screen; `Timer.periodic(Duration(milliseconds: kJoystickPublishIntervalMs))` started on first drag, cancelled on release; on each tick: `MqttService.publishCommand(currentCommand)`; on release: publish `ManualCommand.zero()`; in `dispose()`: publish `ManualCommand.zero()` then cancel timer; reads `connectionStateProvider` — if not `online`, disables joystick with `[TURRET] Offline — manual control unavailable` label
-- [ ] T062 [P] [US7] Unit test joystick velocity in `app/test/unit/joystick_test.dart` — assert: delta normalisation produces correct velocity; values clamped to `kMaxJoystickVelocity`; `ManualCommand.zero()` has both velocities == 0.0; `ManualCommand.toJson()` matches schema in contracts/mqtt-command-outbound.md
 - [ ] T063 [P] [US7] Add "Override" navigation button to `MapScreen` app bar in `app/lib/features/map/map_screen.dart` — navigates to `/override`; only visible when sentry is `online`
 
 ---
@@ -171,10 +183,12 @@
 **Purpose**: Offline map seeding, test tooling, visual polish, and backend dependency documentation.
 
 - [ ] T064 Implement offline tile pre-seeding in `app/lib/features/setup/setup_screen.dart` — after successful MQTT connection, prompt user to download tiles for a configurable bounding box (default: 20 km radius around sentry position) using `FMTC`'s `FMTCStore.manage.download()`; show progress indicator; skippable
-- [ ] T065 [P] Create MQTT test simulation script `test/mqtt_sim.py` — Python script using `paho-mqtt` over TLS; CLI args: `--broker`, `--port`, `--username`, `--password`, `--tier`, `--lat`, `--lon`, `--fsm-state`, `--vx`, `--vy`; publishes a `TelemetryRecord` JSON matching the schema in `contracts/mqtt-telemetry-inbound.md`; used for manual integration testing per quickstart.md
+- [ ] T065 [P] Create MQTT test simulation script `test/mqtt_sim.py` — Python script using `paho-mqtt` over TLS; CLI args: `--broker`, `--port`, `--username`, `--password`, `--tier`, `--lat`, `--lon`, `--fsm-state`, `--vx`, `--vy`; publishes a `TelemetryRecord` JSON matching the schema in `contracts/mqtt-telemetry-inbound.md`; add `--throttle-kbps` flag (uses Linux `tc` or token-bucket sleep loop) to simulate SC-003 EDGE/3G conditions (~50 kbps); used for manual integration testing per quickstart.md
 - [ ] T066 [P] Audit all screens for theme consistency in `app/lib/` — verify no hardcoded colour literals outside `theme.dart`; verify all status strings follow `[SUBSYSTEM] <message>` convention; verify no magic numbers outside `constants.dart`
-- [ ] T067 [P] Add backend dependency notes to `jetson/src/types.py` — add `# TODO(mobile-app): add velocity_vector and fsm_state fields to TelemetryRecord — required by FR-004a and FR-010a` comments on the `TelemetryRecord` class; add equivalent note in `jetson/src/comms/mqtt.py` for `sentry/command` subscriber
-- [ ] T068 Run `flutter test` suite (all unit + integration tests) to confirm full green; run `flutter analyze` with zero warnings; document any iOS Critical Alert entitlement request status in `specs/001-sentry-mobile-app/quickstart.md`
+- [ ] T067 [P] Add backend dependency notes to `jetson/src/types.py` — add `# TODO(mobile-app FR-022a BLOCKING): subscribe to sentry/command topic in mqtt.py and execute received ManualCommand velocities via TurretManager` and `# TODO(mobile-app FR-010a BLOCKING): add velocity_vector and fsm_state fields to TelemetryRecord — required by FR-004a and FR-010a`; **FR-022a (backend MQTT subscriber for manual override) is a BLOCKING dependency for US7 Phase 10 — the app publishes but the sentry must subscribe and execute**; these TODO comments must be resolved before US7 is considered production-ready
+- [ ] T069 [US6] Implement `GeoUtils.applyNorthOffset()` in `app/lib/utils/geo_utils.dart` — static method `LatLng applyNorthOffset(LatLng raw, double offsetDegrees)`; rotates a raw GPS coordinate around the sentry origin by the configured True North offset; called in `ThreatMarkersNotifier` (T033) when plotting each telemetry coordinate; include unit test in `app/test/unit/geo_utils_test.dart` asserting sentry at origin + 90° offset + target at 0° bearing → appears at 270° corrected (resolves FR-021 calibration gap — H1)
+- [ ] T070 [Polish] Implement marker clustering in `flutter_map_marker_cluster` for 5+ simultaneous active markers — clusters display a count badge; tapping expands cluster; prevents marker overlap at low zoom levels; **note**: `flutter_map_marker_cluster` must be checked for compatibility with current `flutter_map` version before adding to pubspec
+- [ ] T068 Run `flutter test` suite (all unit + integration tests) to confirm full green; run `flutter analyze` with zero warnings; document any iOS Critical Alert entitlement request status in `specs/001-sentry-mobile-app/quickstart.md`; manual checklist: (SC-004) setup → MQTT connected ≤ 5 min on clean install; (SC-007) 1-hour background session on Android/iOS with background service active — verify battery drain ≤ 5% per hour on a mid-range device; (SC-008) "View Feed" tap to first MJPEG frame ≤ 10 s on local Wi-Fi; (SC-003) run `mqtt_sim.py --throttle-kbps 50` and confirm map updates and notifications still fire
 
 ---
 
@@ -282,17 +296,17 @@ Developer D: Phase 8 (US3 Video)         → independent HTTP path
 
 ## Summary
 
-| Phase | User Story | Tasks | Priority | Parallelizable |
+| Phase | User Story | Tasks | Priority | Test-First (TDD) |
 |---|---|---|---|---|
 | Phase 1 | Setup | T001–T005 | — | T002–T005 |
 | Phase 2 | Foundational | T006–T023 | — | T007–T022 |
-| Phase 3 | US5 Pairing | T024–T027 | P1 | T027 |
-| Phase 4 | US8 Network | T028–T031 | P1 | T031 |
-| Phase 5 | US1 Map HUD | T032–T044 | P1 🎯 MVP | T041–T044 |
-| Phase 6 | US2 Alerts | T045–T048 | P1 | T048 |
-| Phase 7 | US4 Feed | T049–T053 | P2 | T053 |
+| Phase 3 | US5 Pairing | T024–T027 | P1 | **T027 → then T024–T026** |
+| Phase 4 | US8 Network | T028–T031 | P1 | **T031 → then T028–T030** |
+| Phase 5 | US1 Map HUD | T032–T044 | P1 🎯 MVP | **T041–T044 → then T032–T040** |
+| Phase 6 | US2 Alerts | T045–T048 | P1 | **T048 → then T045–T047** |
+| Phase 7 | US4 Feed | T049–T053 | P2 | **T053 → then T049–T052** |
 | Phase 8 | US3 Video | T054–T056 | P2 | T056 |
-| Phase 9 | US6 Calibration | T057–T059 | P2 | T059 |
-| Phase 10 | US7 Override | T060–T063 | P3 | T062–T063 |
-| Final | Polish | T064–T068 | — | T065–T068 |
-| **Total** | | **68 tasks** | | **36 parallelizable** |
+| Phase 9 | US6 Calibration | T057–T059 + T069 | P2 | T059 |
+| Phase 10 | US7 Override | T060–T063 | P3 | **T062 → then T060–T061, T063** |
+| Final | Polish | T064–T068 + T070 | — | T065–T068 |
+| **Total** | | **71 tasks** | | **TDD order enforced in all phases** |

@@ -79,7 +79,9 @@ app/                             ← Flutter project root
 │       │   └── setup_provider.dart
 │       ├── map/
 │       │   ├── map_screen.dart        ← HUD home screen
-│       │   ├── map_provider.dart
+│       │   ├── connection_provider.dart    # ConnectionStateNotifier (SRP split)
+│       │   ├── telemetry_provider.dart    # TelemetryStreamProvider + ThreatMarkersNotifier + SentryModeProvider (SRP split)
+│       │   ├── selection_provider.dart    # SelectedMarkerNotifier (SRP split)
 │       │   ├── widgets/
 │       │   │   ├── threat_marker_layer.dart
 │       │   │   ├── sentry_mode_badge.dart

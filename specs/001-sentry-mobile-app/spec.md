@@ -168,7 +168,7 @@ As a farm owner in a rural area, I want the app to clearly show me when it has l
 - **FR-003**: The map MUST continuously track and display the user's current GPS location when location permission is granted
 - **FR-003a**: The app MUST calculate and display the straight-line distance between the user's current GPS position and each active target dot, shown both on the map HUD and in the alert log
 - **FR-003b**: If the user denies location permission, the app MUST continue to function fully (map, MQTT, alerting, manual override); the user position dot and all distance readouts MUST be hidden and replaced with "—"; a persistent but non-blocking banner MUST explain the limitation and provide a shortcut to system settings to grant permission
-- **FR-004**: The map MUST render active threat targets as animated dots, positioned at their telemetry-reported coordinates, coloured by severity tier: LOW = yellow, MED = orange, HIGH = red
+- **FR-004**: The map MUST render active threat targets as animated dots positioned at their telemetry-reported coordinates; visual encoding is defined in FR-005
 - **FR-004a**: Active target dots MUST animate using the `velocity_vector` (vx, vy in m/s) published in each TelemetryRecord; this field is a backend dependency (TelemetryRecord extension required)
 - **FR-004b**: When a target is lost (sentry enters SEARCH state), the dot MUST immediately begin a fade animation and display a "Last Seen: <timestamp>" label; the dot MUST be fully removed from the map after 30 seconds
 - **FR-005**: Threat dot colour MUST map to severity tier: LOW = yellow, MED = orange, HIGH = red; size or glow intensity MAY additionally convey severity
@@ -223,7 +223,7 @@ As a farm owner in a rural area, I want the app to clearly show me when it has l
 - **SC-002**: Threat marker positions on the tactical map update within 2 seconds of the corresponding MQTT message being published
 - **SC-003**: The app operates as the primary monitoring interface on an EDGE/3G connection (~50 kbps) without loss of MQTT telemetry data; only the optional video stream degrades
 - **SC-004**: A first-time user completes initial setup and calibration in under 5 minutes
-- **SC-005**: The map remains visually smooth with no perceptible lag when up to 10 threat targets are tracked and updated simultaneously
+- **SC-005**: The map renders at ≥ 30 fps with up to 10 simultaneously animated threat markers on a mid-range device (equivalent to a 3-year-old flagship); no frame budget exceeds 32 ms during a burst update
 - **SC-006**: The app automatically restores live monitoring within 30 seconds of network connectivity being re-established, without user intervention
 - **SC-007**: Background battery consumption during active monitoring (MQTT only, no video) is within platform-standard expectations for a background network service
 - **SC-008**: Users can activate the video verification overlay within 10 seconds of observing a threat marker, without prior training or documentation
