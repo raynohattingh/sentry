@@ -58,24 +58,29 @@ arduino/
     ├── stepper.cpp                  # micros()-scheduled step/direction driver
     ├── lrf.h                        # LrfReader struct + frame parser API
     ├── lrf.cpp                      # SoftwareSerial binary frame accumulator + validator
-    ├── limits.h                     # LimitPin struct + debounce API
-    ├── limits.cpp                   # INPUT_PULLUP active-LOW debounce state machine
+    ├── limit_switch.h               # LimitPin struct + debounce API
+    ├── limit_switch.cpp             # INPUT_PULLUP active-LOW debounce state machine
     ├── serial_proto.h               # Command parser API (V, L command types)
     └── serial_proto.cpp             # Line accumulator + tokeniser for Jetson commands
 
 test/
-└── arduino/
-    ├── platformio.ini               # PlatformIO native environment config
-    ├── test_serial_proto.cpp        # Unit tests: V/L command parse, malformed input
-    ├── test_stepper.cpp             # Unit tests: velocity→interval, direction, clamp, FR-013
-    ├── test_lrf_frame.cpp           # Unit tests: sync bytes, checksum, STA, distance math
-    └── test_limits.cpp              # Unit tests: debounce state transitions, anti-flood
+└── (removed — tests moved to arduino/sentry_turret/test/)
+
+arduino/sentry_turret/test/
+├── test_serial_proto/
+│   └── test_main.cpp        # Unit tests: V/L command parse, malformed input
+├── test_stepper/
+│   └── test_main.cpp        # Unit tests: velocity→interval, direction, clamp, FR-013
+├── test_lrf_frame/
+│   └── test_main.cpp        # Unit tests: sync bytes, checksum, STA, distance math
+└── test_limits/
+    └── test_main.cpp        # Unit tests: debounce state transitions, anti-flood
 ```
 
-**Structure Decision**: Single embedded project (`arduino/sentry_turret/`) with companion `.h`/`.cpp` modules for each subsystem. Tests live in `test/arduino/` using PlatformIO's native (host) test runner, which compiles and executes pure-logic modules without requiring physical hardware.
+**Structure Decision**: Single embedded project (`arduino/sentry_turret/`) with companion `.h`/`.cpp` modules for each subsystem. Tests live in `arduino/sentry_turret/test/` using PlatformIO's conventional subdirectory layout (`test/<suite>/test_main.cpp`), compiled and executed on the host via the `native` test environment.
 
 ## Complexity Tracking
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| Custom `micros()` step scheduler instead of AccelStepper (listed in constitution) | Spec (FR-010, FR-026) mandates a strictly non-blocking cooperative loop with no library-owned ISR (Interrupt Service Routine) hooks. AccelStepper's run()/runSpeed() model abstracts step timing in ways that conflict with the per-axis `nextStepTime` architecture required to co-schedule LRF polling and limit checking in the same loop body. | AccelStepper's ISR-based `runSpeedToPosition()` uses Timer1, which conflicts with `SoftwareSerial` interrupt usage on AVR; the polling variant adds overhead without gain over a direct `micros()` comparison. |
+| Custom `micros()` step scheduler instead of AccelStepper (listed in constitution) | Spec (FR-010, FR-026) mandates a strictly non-blocking cooperative loop with no library-owned ISR (Interrupt Service Routine) hooks. AccelStepper's run()/runSpeed() model abstracts step timing in ways that conflict with the per-axis `nextStepTimeUs` architecture required to co-schedule LRF polling and limit checking in the same loop body. | AccelStepper's ISR-based `runSpeedToPosition()` uses Timer1, which conflicts with `SoftwareSerial` interrupt usage on AVR; the polling variant adds overhead without gain over a direct `micros()` comparison. |

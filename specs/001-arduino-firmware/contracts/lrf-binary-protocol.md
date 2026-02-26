@@ -6,7 +6,7 @@
 
 The Arduino firmware communicates with the LRF (Laser Range Finder) module over a `SoftwareSerial` instance on two spare GPIO (General-Purpose Input/Output) pins. The protocol uses a fixed-length 8-byte binary frame with a 2-byte sync header, a function word, 4 data bytes, and a 1-byte checksum.
 
-**Physical link**: `SoftwareSerial` on configurable RX/TX pins (defaults: RX=D10, TX=D11).  
+**Physical link**: `SoftwareSerial` on configurable RX/TX pins (defaults: RX=A0 / D14, TX=A1 / D15).  
 **Baud rate**: 115200 baud, 8 data bits, 1 stop bit, no parity (`LRF_SOFTSERIAL_BAUD`).  
 **All constants below are defined in `config.h`; no raw bytes appear in logic code.**
 
@@ -14,36 +14,32 @@ The Arduino firmware communicates with the LRF (Laser Range Finder) module over 
 
 ## Frame Layout (All Frames — Send and Reply)
 
+The firmware uses a single 8-byte binary frame format for both the trigger command (send) and the distance response (reply). The send frame always contains `0xFF` placeholder bytes in the data fields; the reply fills those bytes with measurement data.
+
 | Byte index | Field name | Size | Notes |
 |-----------|------------|------|-------|
 | 0 | Frame Header H | 1 byte | Always `0x55` (`LRF_SYNC_H`) |
 | 1 | Frame Header L | 1 byte | Always `0xAA` (`LRF_SYNC_L`) |
-| 2 | Function Word | 1 byte | Identifies the command/response type |
-| 3 | D1 | 1 byte | Send: `0xFF`; Reply: STA byte (`0x01`=ok, `0x00`=fail) |
-| 4 | D2 | 1 byte | Send: `0xFF`; Reply: `0xFF` or reserved |
-| 5 | D3 | 1 byte | Send: `0xFF`; Reply: DIS_H (distance high byte) or ANG_H |
-| 6 | D4 | 1 byte | Send: `0xFF`; Reply: DIS_L (distance low byte) or ANG_L |
-| 7 | Checksum | 1 byte | Frame integrity (see formulas below) |
+| 2 | STA / Function | 1 byte | Send: `0x88` (single-ranging function word); Reply: STA byte (`0x00`=ok, non-zero=error) |
+| 3 | D1 | 1 byte | Send: `0xFF`; Reply: distance MSB (mm, big-endian) |
+| 4 | D2 | 1 byte | Send: `0xFF`; Reply: distance byte 2 (mm, big-endian) |
+| 5 | D3 | 1 byte | Send: `0xFF`; Reply: distance byte 3 (mm, big-endian) |
+| 6 | D4 | 1 byte | Send: `0xFF`; Reply: distance LSB (mm, big-endian) |
+| 7 | Checksum | 1 byte | Frame integrity — same formula for both send and reply (see below) |
 
 **Total frame length**: 8 bytes (`LRF_FRAME_LEN = 8`).
 
 ---
 
-## Checksum Formulas
+## Checksum Formula
 
-### Send-frame checksum
-Covers bytes 2–6 (Function Word + D1..D4) only:
+The same formula applies to **both** send and reply frames. Covers bytes 2–6 (STA/Function + D1..D4):
+
 ```
 checksum = (byte[2] + byte[3] + byte[4] + byte[5] + byte[6]) & 0xFF
 ```
 
-### Reply-frame checksum
-Covers all 7 bytes preceding the checksum (bytes 0–6):
-```
-checksum = (byte[0] + byte[1] + byte[2] + byte[3] + byte[4] + byte[5] + byte[6]) & 0xFF
-```
-
-> **Note**: Send and reply checksum formulas differ. Send excludes the header bytes; reply includes them.
+> **Note**: The header bytes (0 and 1) are **excluded** from the checksum in both directions.
 
 ---
 
@@ -66,22 +62,24 @@ checksum = (byte[0] + byte[1] + byte[2] + byte[3] + byte[4] + byte[5] + byte[6])
 
 ## Single-Ranging Reply — Distance Extraction
 
-Applies when `Function Word = 0x88` and validation passes.
+Applies when reply frame passes all three validation checks (sync bytes, STA=0x00, checksum).
 
-**STA byte** (byte[3]):
-- `0x01` — measurement successful; proceed to distance extraction
-- `0x00` — measurement failure; return `DIST -1.0\n` (do not extract distance)
+**STA byte** (byte[2]):
+- `0x00` — measurement successful; proceed to distance extraction
+- any non-zero value — measurement failure; return `DIST -1.0\n` (do not extract distance)
 
-**Distance formula** (only when `STA = 0x01`):
+**Distance formula** (only when `STA = 0x00`):
 ```c
-uint16_t rawDist = ((uint16_t)buf[5] << 8) | buf[6];  // DIS_H, DIS_L
-float distanceM  = rawDist / 10.0f;                   // module encodes real_m × 10
+uint32_t mm = ((uint32_t)buf[3] << 24) | ((uint32_t)buf[4] << 16)
+            | ((uint32_t)buf[5] <<  8) | (uint32_t)buf[6];  // big-endian mm
+float distanceM = (float)mm / 1000.0f;                      // module encodes distance in millimetres
 ```
 
 **Example**:
 ```
-buf = [0x55, 0xAA, 0x88, 0x01, 0xFF, 0x00, 0x0F, CHK]
-DIS_H = 0x00, DIS_L = 0x0F → rawDist = 15 → distanceM = 1.5 m
+buf = [0x55, 0xAA, 0x00, 0x00, 0x00, 0x05, 0xDC, CHK]
+mm = 0x000005DC = 1500 → distanceM = 1.500 m
+CHK = (0x00+0x00+0x00+0x05+0xDC) & 0xFF = 0xE1
 ```
 
 ---
@@ -91,10 +89,10 @@ DIS_H = 0x00, DIS_L = 0x0F → rawDist = 15 → distanceM = 1.5 m
 Before extracting any data, the firmware MUST validate all three criteria in order:
 
 1. **Sync bytes**: `buf[0] == 0x55` AND `buf[1] == 0xAA` — any mismatch → discard
-2. **Checksum**: `(buf[0]+buf[1]+buf[2]+buf[3]+buf[4]+buf[5]+buf[6]) & 0xFF == buf[7]` — mismatch → discard
-3. **STA byte**: `buf[3] == 0x01` → success; `buf[3] == 0x00` → failure → discard
+2. **STA byte**: `buf[2] == 0x00` → success; any non-zero value → failure → discard
+3. **Checksum**: `(buf[2]+buf[3]+buf[4]+buf[5]+buf[6]) & 0xFF == buf[7]` — mismatch → discard
 
-On any validation failure: flush the `SoftwareSerial` RX buffer, return `DIST -1.0\n`.
+On any validation failure: return `DIST -1.0\n` to Jetson; accumulator resets automatically.
 
 ---
 
@@ -127,21 +125,21 @@ All of the above produce `DIST -1.0\n` on the Jetson serial link.
 
 ## Non-Blocking Read Protocol
 
-The firmware MUST NOT use blocking reads or `delay()` for LRF frame reception (FR-026, NFR-007). The required non-blocking pattern per `loop()` iteration:
+The firmware MUST NOT use blocking reads or `delay()` for LRF frame reception (FR-026, NFR-007). Frame accumulation is handled entirely inside `lrfFeedByte()` (defined in `lrf.cpp`). The required non-blocking pattern per `loop()` iteration:
 
 ```c
-if (lrfPending) {
-    while (lrfSerial.available() && lrfBufLen < LRF_FRAME_LEN) {
-        lrfBuf[lrfBufLen++] = lrfSerial.read();
+while (lrfSerial.available()) {
+    const float result = lrfFeedByte(lrfReader, (uint8_t)lrfSerial.read());
+    if (result >= 0.0f) {
+        // Valid distance: emit DIST <value>\n
+    } else if (result == -1.0f) {
+        // Frame error: emit DIST -1.0\n
     }
-    if (lrfBufLen == LRF_FRAME_LEN) {
-        // validate and extract
-    } else if (millis() - lrfReadStart > LRF_READ_TIMEOUT_MS) {
-        // timeout: flush, emit DIST -1.0\n, reset state
-        while (lrfSerial.available()) lrfSerial.read();  // flush
-    }
+    // result == -2.0f → still accumulating; do nothing
 }
 ```
+
+`lrfFeedByte()` maintains all accumulator state internally (`LrfReader.buf`, `.idx`, `.active`). The caller does not need to manage buffer pointers or frame boundaries.
 
 ---
 

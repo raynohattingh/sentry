@@ -8,7 +8,7 @@
 
 **Rationale**: The firmware runs a strict cooperative single-`loop()` architecture where every subsystem — step-pulse generation, serial parsing, limit switch checking, LRF polling, and heartbeat — shares CPU time with no blocking calls. AccelStepper's ISR (Interrupt Service Routine)-based `runSpeedToPosition()` uses Timer1 output-compare interrupts, which conflict with `SoftwareSerial`'s use of external-change interrupts for bit-banged reception on AVR. AccelStepper's polling variant (`run()`/`runSpeed()`) avoids the ISR conflict but adds an unnecessary dependency and wraps a concept that is cleaner expressed directly.
 
-The chosen approach maintains one `unsigned long nextStepTime` per axis (in `micros()` domain). Each `loop()` iteration checks `micros() >= nextStepTime` and fires a pulse if due, then recomputes `nextStepTime = micros() + stepIntervalUs`. Step interval is derived from the velocity command: `stepIntervalUs = VELOCITY_SCALE_FACTOR / |velocity|` (clamped to `MIN_STEP_INTERVAL_US`).
+The chosen approach maintains one `unsigned long nextStepTimeUs` per axis (in `micros()` domain). Each `loop()` iteration checks `micros() >= nextStepTimeUs` and fires a pulse if due, then recomputes `nextStepTimeUs = micros() + stepIntervalUs`. Step interval is derived from the velocity command: `stepIntervalUs = VELOCITY_SCALE_FACTOR / |velocity|` (clamped to `MIN_STEP_INTERVAL_US`).
 
 **Alternatives considered**:
 - AccelStepper polling — Rejected: dependency overhead, no acceleration needed, ISR conflict risk.
@@ -58,10 +58,11 @@ If the AVR platform is retired in favour of ESP32 or Teensy 4.0, both platforms 
 
 **Rationale**: PlatformIO supports a `[env:native]` configuration that compiles the project with the host GCC (GNU Compiler Collection) toolchain rather than avr-gcc. By structuring the modules so that only `config.h` references AVR/Arduino-specific types (`uint8_t`, `unsigned long`) — all of which exist as standard C++ types on the host — the logic modules can be compiled and tested without a physical board. The Arduino `Serial`, `SoftwareSerial`, `micros()`, and `millis()` API calls are restricted to `sentry_turret.ino` and thin driver shims that are replaced by mocks in the native test environment.
 
-**Test file structure**:
-- `test_serial_proto.cpp` — tests `parseCommand()` for valid `V`/`L` lines, malformed input, missing arguments, and buffer overflow.
-- `test_lrf_frame.cpp` — tests `validateFrame()` for correct sync bytes, checksum computation, STA byte handling, distance extraction formula, and all error code paths.
-- `test_limits.cpp` — tests the debounce state machine: clean HIGH→LOW transition fires exactly one event; held-LOW produces no repeats; LOW→HIGH→LOW fires a second event after `LIMIT_DEBOUNCE_MS`.
+**Test file structure** (in `arduino/sentry_turret/test/`):
+- `test/test_serial_proto/test_main.cpp` — tests `serialProtoFeed()` for valid `V`/`L` lines, malformed input, missing arguments, and buffer overflow.
+- `test/test_lrf_frame/test_main.cpp` — tests `lrfFeedByte()` for correct sync bytes, checksum computation, STA byte handling, distance extraction formula, and all error code paths.
+- `test/test_limits/test_main.cpp` — tests the debounce state machine: clean HIGH→LOW transition fires exactly one event; held-LOW produces no repeats; LOW→HIGH→LOW fires a second event after `LIMIT_DEBOUNCE_MS`.
+- `test/test_stepper/test_main.cpp` — tests `stepperSetVelocity()` interval calculation, direction pin mapping, INT32 clamp, and FR-013 compliance.
 
 **Alternatives considered**:
 - Arduino unit test frameworks (AUnit, ArduinoUnit) — Rejected: require physical hardware or a simulator; slower iteration loop.

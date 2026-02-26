@@ -7,7 +7,8 @@
  *   2. Feed incoming Jetson bytes through the serial protocol parser each loop().
  *   3. Dispatch parsed commands to the appropriate module.
  *   4. Tick all state-machine modules (stepper, limit switches) every loop().
- *   5. Gate stepper velocity to zero when any limit switch is triggered.
+ *   5. Gate stepper velocity to zero when any limit switch is triggered and
+ *      emit a LIMIT <axis> <direction> notification to the Jetson.
  *   6. Broadcast a POS heartbeat every HEARTBEAT_INTERVAL_MS milliseconds.
  *   7. Enable the Watchdog Timer (WDT) at the end of setup(); reset it at the
  *      start of every loop() to prevent spurious resets (NFR-001/NFR-002).
@@ -53,6 +54,12 @@ static LrfReader      lrfReader;
 
 // --- Heartbeat ---
 static unsigned long lastHeartbeatMs = 0;
+
+// --- Limit switch previous-triggered state (for LIMIT message edge detection) ---
+static bool prevPanLeft  = false;
+static bool prevPanRight = false;
+static bool prevTiltDown = false;
+static bool prevTiltUp   = false;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: gate stepper velocity when any limit switch is triggered (FR-007)
@@ -190,6 +197,18 @@ void loop() {
 
     // Apply limit gates after ticking (state may have just changed).
     applyLimitGates();
+
+    // ── LIMIT notifications (FR-007, SC-007) ────────────────────────────────
+    // Emit once per confirmed trigger (rising edge: false → true) so the Jetson
+    // receives exactly one LIMIT message per discrete switch press.
+    if (limitPanLeft.triggered  && !prevPanLeft)  { Serial.println(F("LIMIT PAN LEFT"));  }
+    if (limitPanRight.triggered && !prevPanRight) { Serial.println(F("LIMIT PAN RIGHT")); }
+    if (limitTiltDown.triggered && !prevTiltDown) { Serial.println(F("LIMIT TILT DOWN")); }
+    if (limitTiltUp.triggered   && !prevTiltUp)   { Serial.println(F("LIMIT TILT UP"));   }
+    prevPanLeft  = limitPanLeft.triggered;
+    prevPanRight = limitPanRight.triggered;
+    prevTiltDown = limitTiltDown.triggered;
+    prevTiltUp   = limitTiltUp.triggered;
 
     // ── Stepper step emission ────────────────────────────────────────────────
     stepperTick(panAxis);

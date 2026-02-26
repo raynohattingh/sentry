@@ -127,7 +127,7 @@ LIMIT TILT DOWN\n    → tilt axis has reached its down physical end-stop
 
 ---
 
-### `LRF_BOOT_ERR` — LRF Boot Diagnostics (optional)
+### `LRF_BOOT_ERR` — LRF Boot Diagnostics (not currently emitted)
 
 ```
 LRF_BOOT_ERR <err_code>\n
@@ -137,7 +137,7 @@ LRF_BOOT_ERR <err_code>\n
 |-------|------|-------------|
 | `err_code` | `uint8_t` (hex or decimal) | Error code from the LRF boot self-test reply frame |
 
-**Sent**: At most once, during `setup()`, if the LRF emits a boot self-test frame with `STA=0x00`. Informational only; firmware continues initialisation regardless.
+**Current behaviour**: The `setup()` boot-drain loop silently discards the LRF boot frame regardless of its STA value. `LRF_BOOT_ERR` is documented here as a future enhancement; it is **not currently emitted** by the firmware.
 
 ---
 
