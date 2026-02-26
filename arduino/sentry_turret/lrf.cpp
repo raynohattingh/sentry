@@ -1,0 +1,88 @@
+/**
+ * @file lrf.cpp
+ * @brief Laser Range Finder (LRF) driver implementation.
+ *
+ * See lrf.h for protocol specification and API documentation.
+ */
+
+#ifndef NATIVE_ENV
+#  include <Arduino.h>
+#endif
+
+#include "lrf.h"
+#include "config.h"
+
+#include <string.h>
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** @brief Verify sync bytes, STA byte, and checksum of a complete 8-byte frame. */
+static bool frameValid(const uint8_t buf[8]) {
+    // Sync bytes
+    if (buf[0] != LRF_SYNC_H || buf[1] != LRF_SYNC_L) return false;
+    // STA byte — 0x00 means valid ranging
+    if (buf[2] != 0x00) return false;
+    // Checksum: sum of bytes [2..6] & 0xFF must equal byte[7]
+    uint8_t ck = 0;
+    for (uint8_t i = 2; i <= 6; ++i) ck += buf[i];
+    return ck == buf[7];
+}
+
+/** @brief Extract distance in metres from a validated 8-byte frame.
+ *  Bytes [3..6] encode the distance in millimetres as a big-endian uint32_t. */
+static float extractDistanceM(const uint8_t buf[8]) {
+    uint32_t mm = (static_cast<uint32_t>(buf[3]) << 24) |
+                  (static_cast<uint32_t>(buf[4]) << 16) |
+                  (static_cast<uint32_t>(buf[5]) <<  8) |
+                  (static_cast<uint32_t>(buf[6]));
+    return static_cast<float>(mm) / 1000.0f;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────────────────────────
+
+void lrfInit(LrfReader& reader) {
+    memset(reader.buf, 0, sizeof(reader.buf));
+    reader.idx    = 0;
+    reader.active = false;
+}
+
+void lrfTrigger(Stream& serial) {
+    serial.write(LRF_TRIGGER, LRF_FRAME_LEN);
+}
+
+float lrfFeedByte(LrfReader& reader, uint8_t byte) {
+    // Wait for sync header before accepting bytes.
+    if (!reader.active) {
+        if (reader.idx == 0 && byte == LRF_SYNC_H) {
+            reader.buf[reader.idx++] = byte;
+        } else if (reader.idx == 1 && byte == LRF_SYNC_L) {
+            reader.buf[reader.idx++] = byte;
+            reader.active = true;
+        } else {
+            // Unexpected byte before sync — reset accumulator.
+            reader.idx = 0;
+        }
+        return -2.0f;
+    }
+
+    // Accumulate remaining bytes.
+    reader.buf[reader.idx++] = byte;
+
+    if (reader.idx < LRF_FRAME_LEN) {
+        return -2.0f;  // Still accumulating.
+    }
+
+    // Frame complete — validate and extract distance.
+    const bool valid = frameValid(reader.buf);
+
+    // Reset for next frame.
+    reader.idx    = 0;
+    reader.active = false;
+
+    if (!valid) return -1.0f;
+    return extractDistanceM(reader.buf);
+}
