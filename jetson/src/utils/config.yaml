@@ -77,6 +77,20 @@ CAMERA_FAULT_THRESHOLD:
   valid_range: 1 – 50
   description: Consecutive failed cap.read() calls before camera fault is declared
 
+CAMERA_FPS:
+  type: int
+  default: 25
+  unit: frames/second
+  valid_range: 1 – 120
+  description: Camera capture frame rate; used for pixel-to-m/s velocity conversion
+
+CAMERA_HFOV_DEG:
+  type: float
+  default: 120.0
+  unit: degrees
+  valid_range: 10 – 180
+  description: Horizontal field-of-view of the camera lens; calibrate per physical lens
+
 # ---------------------------------------------------------------------------
 # AI / Inference
 # ---------------------------------------------------------------------------
@@ -454,14 +468,48 @@ MQTT_BROKER:
 
 MQTT_PORT:
   type: int
-  default: 1883
+  default: 8883
   valid_range: 1 – 65535
-  description: MQTT broker TCP port
+  description: MQTT broker TCP port (8883 = TLS; 1883 = plain TCP for testing)
 
 MQTT_TOPIC:
   type: str
   default: sentry/telemetry
   description: MQTT topic for telemetry record publication
+
+MQTT_COMMAND_TOPIC:
+  type: str
+  default: sentry/command
+  description: MQTT topic for inbound manual-override commands (joystick → CommandSubscriber)
+
+MQTT_USERNAME:
+  type: str
+  default: ""
+  description: MQTT broker username; leave empty to disable authentication
+
+MQTT_PASSWORD:
+  type: str
+  default: ""
+  description: MQTT broker password; leave empty to disable authentication
+
+SENTRY_ID:
+  type: str
+  default: (required — no default)
+  description: Unique sentry identifier; must be set via env var before launch
+
+COMMAND_SAFETY_TIMEOUT_S:
+  type: float
+  default: 3.0
+  unit: seconds
+  valid_range: 0.5 – 30
+  description: Idle timeout for manual-override mode; turret stops if no command received within this window
+
+COMMAND_RATE_LIMIT_HZ:
+  type: int
+  default: 20
+  unit: Hz
+  valid_range: 1 – 100
+  description: Maximum rate at which inbound joystick commands are forwarded to TurretManager
 
 # ---------------------------------------------------------------------------
 # Web HUD

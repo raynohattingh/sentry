@@ -224,7 +224,7 @@ def main() -> None:
             for t in targets:
                 a = next((x for x in assessments if x.target_id == t.target_id), None)
                 if a:
-                    rec = recorder.record(t, a, link.last_lrf_reading, position)
+                    rec = recorder.record(t, a, link.last_lrf_reading, position, fsm_state=brain.state)
                     recorder.emit(rec)
 
             # J. HUD overlay.
