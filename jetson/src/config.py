@@ -35,6 +35,8 @@ GST_PIPELINE: str = (
     "appsink drop=1"
 )
 CAMERA_FAULT_THRESHOLD: int = 5  # Consecutive failed frames before fault declared
+CAMERA_FPS: int = int(os.environ.get("CAMERA_FPS", "25"))
+CAMERA_HFOV_DEG: float = float(os.environ.get("CAMERA_HFOV_DEG", "120.0"))
 
 # ---------------------------------------------------------------------------
 # AI / Inference
@@ -151,8 +153,14 @@ TELEMETRY_BACKUP_COUNT: int = 5
 # ---------------------------------------------------------------------------
 
 MQTT_BROKER: str = os.environ.get("MQTT_BROKER", "localhost")
-MQTT_PORT: int = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_PORT: int = int(os.environ.get("MQTT_PORT", "8883"))
 MQTT_TOPIC: str = os.environ.get("MQTT_TOPIC", "sentry/telemetry")
+MQTT_COMMAND_TOPIC: str = os.environ.get("MQTT_COMMAND_TOPIC", "sentry/command")
+MQTT_USERNAME: str = os.environ.get("MQTT_USERNAME", "")
+MQTT_PASSWORD: str = os.environ.get("MQTT_PASSWORD", "")
+SENTRY_ID: str = os.environ["SENTRY_ID"]
+COMMAND_SAFETY_TIMEOUT_S: float = float(os.environ.get("COMMAND_SAFETY_TIMEOUT_S", "3.0"))
+COMMAND_RATE_LIMIT_HZ: int = int(os.environ.get("COMMAND_RATE_LIMIT_HZ", "20"))
 
 # ---------------------------------------------------------------------------
 # Web HUD

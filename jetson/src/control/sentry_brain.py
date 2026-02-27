@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -78,6 +79,8 @@ class SentryBrain:
         _refresh_dwell()
         self._state: FSMState = FSMState.SCAN
         self._state_entered_ns: int = time.monotonic_ns()
+        self._override_lock = threading.Lock()
+        self._override: bool = False
 
         self._pan_pid = PIDController(
             config.PAN_KP, config.PAN_KI, config.PAN_KD, config.PAN_MAX,
@@ -102,8 +105,21 @@ class SentryBrain:
 
     @property
     def state(self) -> FSMState:
-        """Current FSM state."""
+        """Current FSM state; returns MANUAL_OVERRIDE when override is active."""
+        with self._override_lock:
+            if self._override:
+                return FSMState.MANUAL_OVERRIDE
         return self._state
+
+    def enter_override(self) -> None:
+        """Activate manual override; FSM updates are suppressed until exit_override()."""
+        with self._override_lock:
+            self._override = True
+
+    def exit_override(self) -> None:
+        """Deactivate manual override; FSM resumes from its last internal state."""
+        with self._override_lock:
+            self._override = False
 
     @property
     def approaching_limit(self) -> bool:
@@ -126,6 +142,10 @@ class SentryBrain:
             TurretCommand with pan/tilt velocities and LRF flag.
         """
         _refresh_dwell()
+        with self._override_lock:
+            if self._override:
+                return TurretCommand(pan_velocity=0.0, tilt_velocity=0.0, fire_lrf=False,
+                                     timestamp_utc=datetime.datetime.utcnow().isoformat() + "Z")
         self._update_state(assessments, position)
 
         pan_v, tilt_v, fire_lrf = self._compute_velocities(assessments, position)

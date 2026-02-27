@@ -60,13 +60,13 @@ def recorder_no_lrf(mock_mqtt, tmp_path, monkeypatch):
 
 def test_record_contains_session_id(recorder):
     rec, _ = recorder
-    record = rec.record(_target(), _assessment(), _lrf(), _pos())
+    record = rec.record(_target(), _assessment(), _lrf(), _pos(), fsm_state=FSMState.SCAN)
     assert record.session_id == "test-session"
 
 
 def test_lrf_disabled_nulls_gps(recorder_no_lrf):
     rec, _ = recorder_no_lrf
-    record = rec.record(_target(), _assessment(), _lrf(), _pos())
+    record = rec.record(_target(), _assessment(), _lrf(), _pos(), fsm_state=FSMState.SCAN)
     assert record.lat is None
     assert record.lon is None
     assert record.lrf_distance_m is None
@@ -74,7 +74,7 @@ def test_lrf_disabled_nulls_gps(recorder_no_lrf):
 
 def test_emit_produces_valid_json(recorder, tmp_path):
     rec, _ = recorder
-    record = rec.record(_target(), _assessment(), _lrf(), _pos())
+    record = rec.record(_target(), _assessment(), _lrf(), _pos(), fsm_state=FSMState.SCAN)
     rec.emit(record)
     # Find the log file
     jsonl_files = list(tmp_path.glob("*.jsonl"))
@@ -87,12 +87,13 @@ def test_emit_produces_valid_json(recorder, tmp_path):
 
 def test_publish_async_called(recorder):
     rec, mqtt = recorder
-    record = rec.record(_target(), _assessment(), _lrf(), _pos())
+    record = rec.record(_target(), _assessment(), _lrf(), _pos(), fsm_state=FSMState.SCAN)
     rec.emit(record)
     assert mqtt.publish_async.called
 
 
 def test_invalid_lrf_produces_null_distance(recorder):
     rec, _ = recorder
-    record = rec.record(_target(), _assessment(), _lrf(valid=False, distance=None), _pos())
+    record = rec.record(_target(), _assessment(), _lrf(valid=False, distance=None), _pos(),
+                        fsm_state=FSMState.SCAN)
     assert record.lrf_distance_m is None

@@ -116,3 +116,45 @@ class TestDwellTimer:
         brain._state_entered_ns = time.monotonic_ns()
         brain.update([_assessment(score=90.0, tier=ThreatTier.HIGH, state=FSMState.ACQUIRE)], _pos())
         assert brain.state == FSMState.ACQUIRE
+
+
+class TestManualOverride:
+    """Tests for FR-022a manual override API (T009)."""
+
+    def test_enter_override_returns_manual_override_state(self):
+        brain = _fresh_brain()
+        brain.enter_override()
+        assert brain.state == FSMState.MANUAL_OVERRIDE
+
+    def test_exit_override_restores_previous_fsm_state(self):
+        brain = _fresh_brain()
+        brain._state = FSMState.TRACK
+        brain.enter_override()
+        assert brain.state == FSMState.MANUAL_OVERRIDE
+        brain.exit_override()
+        assert brain.state == FSMState.TRACK
+
+    def test_override_does_not_mutate_internal_state(self):
+        """_state must remain unchanged during override; only state property differs."""
+        brain = _fresh_brain()
+        brain.enter_override()
+        assert brain._state == FSMState.SCAN  # internal state unchanged
+        assert brain.state == FSMState.MANUAL_OVERRIDE  # property returns override
+
+    def test_double_enter_override_idempotent(self):
+        brain = _fresh_brain()
+        brain.enter_override()
+        brain.enter_override()  # second call must not raise or change state
+        assert brain.state == FSMState.MANUAL_OVERRIDE
+
+    def test_exit_override_without_enter_is_safe(self):
+        brain = _fresh_brain()
+        brain.exit_override()  # must not raise
+        assert brain.state == FSMState.SCAN
+
+    def test_update_during_override_does_not_change_reported_state(self):
+        """FSM update must be suppressed while override is active."""
+        brain = _fresh_brain()
+        brain.enter_override()
+        brain.update([_assessment(score=90.0, tier=ThreatTier.HIGH, state=FSMState.ACQUIRE)], _pos())
+        assert brain.state == FSMState.MANUAL_OVERRIDE
