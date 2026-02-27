@@ -1,0 +1,186 @@
+import 'dart:async';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
+
+import '../../core/constants.dart';
+import '../../models/connection_state.dart';
+import '../../models/sentry_config.dart';
+import '../../models/telemetry_record.dart';
+import '../../models/threat_marker.dart';
+import '../../services/location_service.dart';
+import '../../services/mqtt_service.dart';
+import '../../utils/geo_utils.dart';
+
+/// Provider for the MQTT service — override in tests and in DI root.
+final mqttServiceProvider = Provider<MqttService>((ref) {
+  throw UnimplementedError('Provide MqttService in ProviderScope overrides');
+});
+
+/// Provider for the location service.
+final locationServiceProvider = Provider<LocationService?>((ref) => null);
+
+/// Provider for the current sentry config (north offset).
+final sentryConfigForMapProvider = Provider<SentryConfig>((ref) {
+  // Forward-declared — overridden in main.dart / MapScreen
+  return const SentryConfig();
+});
+
+/// Stream provider for raw telemetry records.
+final telemetryStreamProvider = StreamProvider<TelemetryRecord>((ref) {
+  final mqtt = ref.watch(mqttServiceProvider);
+  return mqtt.telemetryStream;
+});
+
+/// Notifier managing the map of live threat markers.
+class ThreatMarkersNotifier
+    extends StateNotifier<Map<int, ThreatMarker>> {
+  ThreatMarkersNotifier(
+    this._mqttService,
+    LatLng? initialUserLocation, {
+    SentryConfig config = const SentryConfig(),
+  })  : _userLocation = initialUserLocation,
+        _config = config,
+        super({}) {
+    _telemetrySub =
+        _mqttService.telemetryStream.listen(_onTelemetry);
+    _connectionSub =
+        _mqttService.connectionStream.listen(_onConnectionState);
+  }
+
+  final MqttService _mqttService;
+  LatLng? _userLocation;
+  final SentryConfig _config;
+
+  StreamSubscription<TelemetryRecord>? _telemetrySub;
+  StreamSubscription<SentryConnectionState>? _connectionSub;
+  final Map<int, Timer> _fadeTimers = {};
+
+  void updateUserLocation(LatLng? location) {
+    _userLocation = location;
+    // Recalculate distances for all active markers
+    final updated = Map<int, ThreatMarker>.from(state);
+    for (final entry in updated.entries) {
+      if (entry.value.markerState != MarkerState.removed) {
+        final dist = GeoUtils.distanceOrNull(
+            _userLocation, LatLng(entry.value.lat, entry.value.lon));
+        updated[entry.key] = entry.value.copyWith(distanceToUserM: dist);
+      }
+    }
+    state = updated;
+  }
+
+  void _onTelemetry(TelemetryRecord record) {
+    if (record.lat == null || record.lon == null) return;
+
+    // Apply north offset calibration (FR-021)
+    LatLng position = LatLng(record.lat!, record.lon!);
+    if (_config.sentryLat != null &&
+        _config.sentryLon != null &&
+        _config.northOffsetDegrees != 0.0) {
+      position = GeoUtils.applyNorthOffset(
+        position,
+        LatLng(_config.sentryLat!, _config.sentryLon!),
+        _config.northOffsetDegrees,
+      );
+    }
+
+    final isFading = record.fsmState == FsmState.search;
+    final dist = GeoUtils.distanceOrNull(_userLocation, position);
+
+    final existing = state[record.targetId];
+    final markerState =
+        isFading ? MarkerState.fading : MarkerState.active;
+
+    final marker = ThreatMarker(
+      targetId: record.targetId,
+      tier: record.tier,
+      lat: position.latitude,
+      lon: position.longitude,
+      threatScore: record.threatScore,
+      panAngle: record.panAngle,
+      tiltAngle: record.tiltAngle,
+      lastUpdated: record.timestampUtc,
+      markerState: markerState,
+      isSelected: existing?.isSelected ?? false,
+      distanceToUserM: dist,
+      lrfDistanceM: record.lrfDistanceM,
+      fadingStartedAt:
+          isFading ? (existing?.fadingStartedAt ?? DateTime.now()) : null,
+    );
+
+    // Cancel any existing fade timer if going back to active
+    if (!isFading) {
+      _fadeTimers[record.targetId]?.cancel();
+      _fadeTimers.remove(record.targetId);
+    } else {
+      _scheduleFadeRemoval(record.targetId);
+    }
+
+    state = {...state, record.targetId: marker};
+  }
+
+  void _onConnectionState(SentryConnectionState connState) {
+    if (connState == SentryConnectionState.offline) {
+      fadeAll();
+    }
+  }
+
+  void _scheduleFadeRemoval(int targetId) {
+    _fadeTimers[targetId]?.cancel();
+    _fadeTimers[targetId] =
+        Timer(const Duration(seconds: kMarkerFadeRemovalSec), () {
+      final updated = Map<int, ThreatMarker>.from(state);
+      updated.remove(targetId);
+      state = updated;
+      _fadeTimers.remove(targetId);
+    });
+  }
+
+  /// Fades all active markers (called on telemetry loss / offline state).
+  void fadeAll() {
+    final updated = <int, ThreatMarker>{};
+    for (final entry in state.entries) {
+      if (entry.value.markerState == MarkerState.active) {
+        updated[entry.key] = entry.value.copyWith(
+          markerState: MarkerState.fading,
+          fadingStartedAt: DateTime.now(),
+        );
+        _scheduleFadeRemoval(entry.key);
+      } else {
+        updated[entry.key] = entry.value;
+      }
+    }
+    state = updated;
+  }
+
+  @override
+  void dispose() {
+    _telemetrySub?.cancel();
+    _connectionSub?.cancel();
+    for (final timer in _fadeTimers.values) {
+      timer.cancel();
+    }
+    super.dispose();
+  }
+}
+
+/// Riverpod provider for [ThreatMarkersNotifier].
+final threatMarkersProvider =
+    StateNotifierProvider<ThreatMarkersNotifier, Map<int, ThreatMarker>>(
+  (ref) {
+    final mqtt = ref.watch(mqttServiceProvider);
+    final config = ref.watch(sentryConfigForMapProvider);
+    return ThreatMarkersNotifier(mqtt, null, config: config);
+  },
+);
+
+/// Provider tracking the current sentry FSM state.
+final sentryModeProvider = StateProvider<FsmState?>((ref) => null);
+
+/// Wires the FSM state from telemetry (call from MapScreen init).
+void updateSentryMode(Ref ref, TelemetryRecord record) {
+  if (record.fsmState != null) {
+    ref.read(sentryModeProvider.notifier).state = record.fsmState;
+  }
+}

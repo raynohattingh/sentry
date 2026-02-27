@@ -219,3 +219,25 @@ class TelemetryRecord:
     pan_angle: float
     tilt_angle: float
     timestamp_utc: str
+
+
+# ---------------------------------------------------------------------------
+# Mobile app backend dependency TODOs
+# ---------------------------------------------------------------------------
+
+# TODO(mobile-app FR-022a BLOCKING): subscribe to sentry/command topic in
+# mqtt.py and execute received ManualCommand velocities via TurretManager.
+# The mobile app (OverrideScreen) publishes ManualCommand JSON to sentry/command
+# at ~10 Hz. Without this subscriber the joystick has no effect.
+# Schema: {"sentry_id": str, "pan_velocity": float, "tilt_velocity": float,
+#          "timestamp_utc": ISO8601}
+# FR-022a (backend MQTT subscriber for manual override) is a BLOCKING
+# dependency for US7 Phase 10 — the app publishes but the sentry must
+# subscribe and execute.
+
+# TODO(mobile-app FR-010a BLOCKING): add velocity_vector and fsm_state fields
+# to TelemetryRecord — required by FR-004a and FR-010a.
+# velocity_vector: {"vx": float, "vy": float} | None
+# fsm_state: "SCAN" | "ACQUIRE" | "TRACK" | "SEARCH" | None
+# These fields are consumed by ThreatMarkersNotifier in the Flutter app
+# to animate marker movement (FR-010a) and trigger fading (FR-004a).
