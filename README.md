@@ -44,8 +44,8 @@ Farm Sentry is an **early-warning tactical surveillance system**, not a standard
 
 ```
                   ┌─────────────────────────────────────┐
-                  │         NVIDIA Jetson Orin/NX        │
-                  │                                      │
+                  │         NVIDIA Jetson Orin/NX       │
+                  │                                     │
   USB-CDC         │  Camera → YOLO → Tracker → Scorer   │   MQTT (TLS)
  ┌──────────┐     │  → SentryBrain FSM → ArduinoLink    │◄──────────────► MQTT Broker
  │ Arduino  │◄────┤  → TelemetryRecorder → MQTT Pub     │
@@ -648,13 +648,13 @@ The `ThreatScorer` computes a normalised score in [0.0, 100.0] from four weighte
 
 ```
                     no targets                 no targets
-        ┌─────────────────────────────────────────────────────┐
-        │                                                     │
-        ▼           MED threat                                │
-  ┌──────────┐ ─────────────────► ┌──────────┐  target lost  │
-  │  SCAN    │                    │  TRACK   │ ─────────────► ┌──────────┐
-  │ (sweep)  │ ◄───────────────── │  (PID)   │                │  SEARCH  │
-  └──────────┘    LOW threat      └──────────┘ ◄───────────── │ (arc sw) │
+        ┌───────────────────────────────────────────────────────────┐
+        │                                                           │
+        ▼           MED threat                                      │
+  ┌──────────┐ ─────────────────► ┌──────────┐  target lost         │
+  │  SCAN    │                    │  TRACK   │ ─────────────►  ┌──────────┐
+  │ (sweep)  │ ◄───────────────── │  (PID)   │                 │  SEARCH  │
+  └──────────┘    LOW threat      └──────────┘ ◄─────────────  │ (arc sw) │
         ▲         (dwell gate)         │         not found     └──────────┘
         │                             │ HIGH threat                  │
         │                             ▼                    timeout (10s)
