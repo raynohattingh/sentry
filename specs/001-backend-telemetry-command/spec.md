@@ -7,6 +7,17 @@
 
 ---
 
+## Clarifications
+
+### Session 2026-02-27
+
+- Q: Should `velocity_vector` be published as pixels/frame (raw camera) or metres/second? → A: The backend MUST convert pixels/frame to m/s before publishing. The receiving device is responsible for rendering the velocity vector on its display. This ensures device-independence regardless of camera resolution or frame rate.
+- Q: Should TLS + credentials be enforced for the CommandSubscriber and/or the existing MQTTPublisher? → A: TLS + username/password MUST be added to BOTH `CommandSubscriber` AND `MQTTPublisher`. Both components must connect to the broker on the TLS port (8883) with authenticated credentials — consistent with the mobile app's security requirements.
+- Q: When in MANUAL_OVERRIDE, does the vision/detection pipeline continue running or fully pause? → A: The detection pipeline (camera capture, detection, threat scoring, LRF) continues running during MANUAL_OVERRIDE. Only motor control is handed to the operator. On zero-velocity command or safety timeout, the FSM resumes tracking any currently-detected target immediately — no SCAN restart required.
+- Q: Should `SENTRY_ID` be a required env var or have a default value? → A: Required env var — the process MUST raise an error on startup if `SENTRY_ID` is unset. No default is permitted. This prevents silent misconfiguration when multiple sentries share the same broker.
+
+---
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Mobile App Receives Enriched Telemetry (Priority: P1)
@@ -23,7 +34,7 @@ behaviour. Every mobile user is affected on every telemetry tick.
 
 **Independent Test**: Run the sentry against a test scene. Subscribe to
 `sentry/telemetry` with any MQTT client. Confirm each message contains `fsm_state`
-(one of SCAN/TRACK/ACQUIRE/SEARCH) and `velocity_vector` (`{vx, vy}` or `null`).
+(one of SCAN/TRACK/ACQUIRE/SEARCH) and `velocity_vector` (`{vx, vy}` in m/s or `null`).
 Transition the FSM to SEARCH by removing the target — confirm the next payload carries
 `fsm_state: "SEARCH"`.
 
@@ -31,8 +42,9 @@ Transition the FSM to SEARCH by removing the target — confirm the next payload
 
 1. **Given** the sentry is actively tracking a target, **When** a telemetry record is
    published, **Then** the payload MUST include `fsm_state: "TRACK"` or `"ACQUIRE"` and
-   a non-null `velocity_vector: {"vx": <float>, "vy": <float>}` reflecting the target's
-   pixel-per-frame velocity.
+   a non-null `velocity_vector: {"vx": <float m/s>, "vy": <float m/s>}` representing
+   the target's real-world velocity converted from the camera's pixels-per-frame
+   measurement using LRF distance and frame rate.
 
 2. **Given** the sentry has no active target (SCAN state), **When** a telemetry record
    is published, **Then** the payload MUST include `fsm_state: "SCAN"` and
@@ -71,8 +83,10 @@ command — confirm turret stops and FSM resumes. Publish a command with a wrong
    turret MUST move at approximately the requested velocities within 200 ms of receipt.
 
 2. **Given** the sentry is tracking a HIGH-threat target (ACQUIRE state), **When** a
-   `sentry/command` arrives, **Then** autonomous tracking MUST be suspended for the
-   duration of the override session and resume only when override ends.
+   `sentry/command` arrives, **Then** only motor control MUST be suspended and handed
+   to the operator — the detection pipeline (camera, detection, threat scoring, LRF)
+   continues running silently. On override end, the FSM resumes tracking any
+   currently-detected target immediately without restarting from SCAN.
 
 3. **Given** the operator releases the joystick, **When** a zero-velocity
    `sentry/command` is received, **Then** the turret MUST stop and the FSM MUST
@@ -97,8 +111,9 @@ command — confirm turret stops and FSM resumes. Publish a command with a wrong
 
 - What happens if MQTT delivers a duplicate `sentry/command` (QoS 1 re-delivery)?
   Velocity commands are absolute (not deltas), so re-execution is safe — idempotent.
-- What if `velocity_vector` cannot be computed (first detection frame)?
-  Publish `velocity_vector: null` — the mobile app handles this gracefully.
+- What if `velocity_vector` cannot be computed (first detection frame, or LRF
+  unavailable)? Publish `velocity_vector: null` — the receiving device handles this
+  gracefully (snap position, no animation).
 - What if the sentry process restarts mid-override session? Override state is not
   persisted; on restart the FSM initialises in SCAN state (safe default).
 - What if `pan_velocity` or `tilt_velocity` exceeds the hardware maximum? Values MUST be
@@ -115,12 +130,16 @@ command — confirm turret stops and FSM resumes. Publish a command with a wrong
 #### FR-010a: Velocity Vector in Telemetry
 
 - **FR-010a-1**: The `TelemetryRecord` data model MUST include a `velocity_vector` field
-  containing the tracked target's pixel-per-frame velocity as `{"vx": float, "vy": float}`
-  when a target is actively tracked, or `null` when no target is present.
-- **FR-010a-2**: The telemetry publisher MUST populate `velocity_vector` from the
-  `TrackedTarget.velocity_vector` field that already exists in the system.
-- **FR-010a-3**: `velocity_vector` MUST be serialised to the MQTT payload as a JSON object
-  or JSON `null` — never omitted — to maintain a consistent payload schema.
+  containing the tracked target's real-world velocity as `{"vx": float, "vy": float}`
+  in metres per second (m/s) when a target is actively tracked, or `null` when no
+  target is present. The receiving device is responsible for rendering this on its
+  display; units are device-independent by design.
+- **FR-010a-2**: The telemetry publisher MUST derive `velocity_vector` from
+  `TrackedTarget.velocity_vector` (pixels/frame) by converting to m/s using the
+  current LRF distance measurement and the camera frame rate. If LRF distance is
+  unavailable, publish `velocity_vector: null`.
+- **FR-010a-3**: `velocity_vector` MUST be serialised to the MQTT payload as a JSON
+  object or JSON `null` — never omitted — to maintain a consistent payload schema.
 
 #### FR-010b: FSM State in Telemetry
 
@@ -135,14 +154,22 @@ command — confirm turret stops and FSM resumes. Publish a command with a wrong
 #### FR-022a: Manual Override MQTT Subscriber
 
 - **FR-022a-1**: A new `CommandSubscriber` component MUST subscribe to the
-  `sentry/command` MQTT topic using the same broker and credentials as the existing
-  publisher.
+  `sentry/command` MQTT topic using TLS (port 8883) and username/password credentials
+  from config. This matches the security posture required by the mobile app.
+- **FR-022a-1b**: The existing `MQTTPublisher` MUST be updated to connect via TLS
+  (port 8883) with the same username/password credentials. The broker host, TLS port,
+  username, and password MUST be sourced from config constants (`MQTT_PORT`,
+  `MQTT_USERNAME`, `MQTT_PASSWORD`) — no hardcoded values permitted.
 - **FR-022a-2**: On receipt of a `sentry/command` message, the subscriber MUST validate
-  the `sentry_id` field against the configured sentry identity; mismatched IDs MUST be
-  discarded with a warning log and no motor action taken.
+  the `sentry_id` field against `config.SENTRY_ID`. `SENTRY_ID` is a **required**
+  environment variable — the process MUST raise a startup error if it is unset (no
+  default value). Mismatched IDs MUST be discarded with a warning log and no motor
+  action taken.
 - **FR-022a-3**: On receipt of a valid command, the subscriber MUST put the system into
-  `MANUAL_OVERRIDE` mode, suspending autonomous tracking for the duration of the
-  override session.
+  `MANUAL_OVERRIDE` mode, suspending only motor control for the duration of the override
+  session. The detection pipeline (camera capture, target detection, threat scoring, LRF
+  ranging) MUST continue running throughout the override. On override end, the FSM MUST
+  resume tracking any currently-detected target immediately — no restart from SCAN.
 - **FR-022a-4**: In `MANUAL_OVERRIDE` mode, `pan_velocity` and `tilt_velocity` from
   the command MUST be forwarded directly to the motor driver, clamped to the
   hardware-safe velocity range.
@@ -157,14 +184,15 @@ command — confirm turret stops and FSM resumes. Publish a command with a wrong
   operation, regardless of the safety timeout.
 - **FR-022a-8**: The `CommandSubscriber` MUST run on a dedicated thread, independent
   of the FSM control loop.
-- **FR-022a-9**: The existing `MQTTPublisher` MUST NOT be modified; `CommandSubscriber`
+- **FR-022a-9**: The existing `MQTTPublisher` MUST be updated for TLS and credentials
+  (FR-022a-1b); all other `MQTTPublisher` behaviour remains unchanged. `CommandSubscriber`
   is implemented as a new, independent component.
 
 ### Key Entities
 
 - **TelemetryRecord** (extended): Existing data model. Gains two new fields:
-  `velocity_vector` (object or null) and `fsm_state` (string). Both are included in
-  every MQTT telemetry payload.
+  `velocity_vector` (object with `vx`/`vy` in m/s, or null) and `fsm_state` (string).
+  Both are included in every MQTT telemetry payload.
 - **CommandSubscriber**: New component. Subscribes to `sentry/command`, validates
   `sentry_id`, manages override state and safety timeout, forwards clamped velocities
   to the motor driver.
@@ -198,14 +226,18 @@ command — confirm turret stops and FSM resumes. Publish a command with a wrong
 ## Assumptions
 
 - `TrackedTarget.velocity_vector` (already a `tuple[float, float]` in `types.py`) is
-  the source of truth for `velocity_vector` in telemetry. Serialisation converts the
-  tuple to `{"vx": float, "vy": float}`.
-- The `sentry_id` used for command validation is read from a `config.SENTRY_ID`
-  constant (or equivalent — to be confirmed during planning).
+  the raw pixels/frame source. The telemetry publisher converts this to m/s using
+  `lrf_distance_m` and the camera frame rate (from config). If `lrf_distance_m` is
+  `None`, `velocity_vector` is published as `null`.
+- `config.SENTRY_ID` is a **required** environment variable added to `config.py` as
+  part of this feature. The process MUST fail at startup with a clear error message
+  if `SENTRY_ID` is unset — no default value permitted.
 - `TurretManager.hardware.send_velocity(v_pan, v_tilt)` is the correct low-level call
   for both autonomous and manual velocities.
 - Hardware-safe velocity bounds are `config.PAN_MAX` and `config.TILT_MAX`.
-- `CommandSubscriber` connects to the same broker and uses the same TLS/auth
-  credentials as `MQTTPublisher` — no separate credential management is needed.
+- `CommandSubscriber` and `MQTTPublisher` both connect to the broker via TLS (port 8883)
+  using `MQTT_USERNAME` and `MQTT_PASSWORD` from config. New config constants
+  `MQTT_USERNAME` and `MQTT_PASSWORD` must be added to `config.py`; `MQTT_PORT` default
+  changes from 1883 to 8883.
 - MQTT QoS 1 is used for `sentry/command` subscriptions (at-least-once delivery);
   idempotent velocity commands make this safe.
