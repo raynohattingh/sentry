@@ -31,17 +31,7 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- [ ] **I. Code Quality**: All new modules have a single responsibility; no
-  magic numbers; public interfaces are documented.
-- [ ] **II. Testing Standards**: Unit tests planned for all pure-logic
-  components; hardware-dependent code has a mockable interface; integration
-  tests cover subsystem-boundary flows; TDD (Red–Green–Refactor) confirmed.
-- [ ] **III. UX Consistency**: Any operator-facing output (overlays, status
-  messages, config parameters) follows the `[SUBSYSTEM] <message>` convention
-  and color scheme defined in the constitution.
-- [ ] **IV. Performance Requirements**: Feature impact on vision pipeline FPS,
-  end-to-end latency (< 100 ms), serial round-trip (< 20 ms), and web stream
-  FPS (≥ 15) has been assessed; benchmark plan included if at risk.
+[Gates determined based on constitution file]
 
 ## Project Structure
 
