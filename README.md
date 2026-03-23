@@ -82,7 +82,7 @@ sentry/
 │   ├── src/
 │   │   ├── main.py          # Main control loop entry point
 │   │   ├── config.py        # All constants — env vars override at runtime
-│   │   ├── types.py         # Shared dataclasses and enums
+│   │   ├── sentry_types.py  # Shared dataclasses and enums
 │   │   ├── comms/
 │   │   │   ├── mqtt.py      # MQTTPublisher + CommandSubscriber
 │   │   │   └── serial_io.py # Low-level serial helpers

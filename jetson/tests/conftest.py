@@ -20,8 +20,8 @@ _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-# The stdlib 'types' module shadows our types.py if imported as 'types'.
-# Load our types.py under the alias 'sentry_types' so tests use that name.
+# Load the canonical sentry_types.py module under the runtime import name used
+# across the Jetson codebase.
 import importlib.util as _ilu
 
 def _load_src_module(alias: str, rel_filename: str):
@@ -36,7 +36,7 @@ def _load_src_module(alias: str, rel_filename: str):
     return mod
 
 if "sentry_types" not in sys.modules:
-    _load_src_module("sentry_types", "types.py")
+    _load_src_module("sentry_types", "sentry_types.py")
 
 
 # ---------------------------------------------------------------------------
