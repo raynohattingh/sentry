@@ -30,13 +30,20 @@ services:
 
     # Environment Config
     environment:
+      - SENTRY_ID=${SENTRY_ID:-my-sentry-001}
       - SERIAL_PORT=/dev/ttyUSB0
       - FLASK_ENV=development
       - MQTT_BROKER=localhost
       - MQTT_PORT=1883
       - MQTT_TOPIC=sentry/telemetry
+      - MQTT_STATUS_TOPIC=${MQTT_STATUS_TOPIC:-sentry/status}
       - HUD_USERNAME=sentry
       - HUD_PASSWORD=changeme
+      - HOUSING_PROFILE=${HOUSING_PROFILE:-MVP}
+      - TEST_BENCH_PAN_MIN_STEPS=${TEST_BENCH_PAN_MIN_STEPS:-}
+      - TEST_BENCH_PAN_MAX_STEPS=${TEST_BENCH_PAN_MAX_STEPS:-}
+      - TEST_BENCH_TILT_MIN_STEPS=${TEST_BENCH_TILT_MIN_STEPS:-}
+      - TEST_BENCH_TILT_MAX_STEPS=${TEST_BENCH_TILT_MAX_STEPS:-}
 
 volumes:
   sentry_state:

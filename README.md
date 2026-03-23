@@ -447,7 +447,7 @@ docker compose -f docker/docker-compose.yaml up --build -d
 docker logs -f sentry_brain
 ```
 
-> **Note:** Edit `docker/docker-compose.yaml` to set your environment variables. The `privileged: true` flag is required for USB camera and serial access.
+> **Note:** Edit `docker/docker-compose.yaml` to set your environment variables. Docker Compose now provides fallbacks for `SENTRY_ID`, `MQTT_STATUS_TOPIC`, and `HOUSING_PROFILE`, and it passes through the optional `TEST_BENCH_*_STEPS` bounds. You should still override `SENTRY_ID` so it matches your real unit/app configuration. The `privileged: true` flag is required for USB camera and serial access.
 
 #### Option B — Direct Python
 
