@@ -48,6 +48,47 @@ class FSMState(str, Enum):
     MANUAL_OVERRIDE = "MANUAL_OVERRIDE"
 
 
+class HousingProfile(str, Enum):
+    """Physical enclosure profile that determines motion safety behavior."""
+
+    TEST_BENCH = "TEST_BENCH"
+    MVP = "MVP"
+
+    @classmethod
+    def from_raw(cls, value: str | None) -> "HousingProfile":
+        if value is None:
+            return cls.MVP
+        try:
+            return cls(value.upper())
+        except ValueError:
+            return cls.MVP
+
+
+class LimitAxis(str, Enum):
+    PAN = "PAN"
+    TILT = "TILT"
+
+
+class LimitDirection(str, Enum):
+    LEFT = "LEFT"
+    RIGHT = "RIGHT"
+    UP = "UP"
+    DOWN = "DOWN"
+
+
+class LimitValidationState(str, Enum):
+    BYPASSED = "BYPASSED"
+    BLOCKED_INVALID_BOUNDS = "BLOCKED_INVALID_BOUNDS"
+    PENDING_SWITCH_VALIDATION = "PENDING_SWITCH_VALIDATION"
+    READY_HARDWARE_VALIDATED = "READY_HARDWARE_VALIDATED"
+
+
+class ProtectionMode(str, Enum):
+    SOFT_LIMIT_BYPASS = "SOFT_LIMIT_BYPASS"
+    HARDWARE_VALIDATION_PENDING = "HARDWARE_VALIDATION_PENDING"
+    HARDWARE_LIMITS_ACTIVE = "HARDWARE_LIMITS_ACTIVE"
+
+
 # ---------------------------------------------------------------------------
 # Vision entities
 # ---------------------------------------------------------------------------
@@ -186,6 +227,81 @@ class LRFReading:
     distance_m: float | None
     valid: bool
     received_utc: str
+
+
+@dataclass(frozen=True)
+class SoftMotionBounds:
+    """Inclusive software travel envelope used for test-bench operation."""
+
+    pan_min_steps: int | None
+    pan_max_steps: int | None
+    tilt_min_steps: int | None
+    tilt_max_steps: int | None
+
+    @property
+    def is_valid(self) -> bool:
+        values = (
+            self.pan_min_steps,
+            self.pan_max_steps,
+            self.tilt_min_steps,
+            self.tilt_max_steps,
+        )
+        if any(value is None for value in values):
+            return False
+        assert self.pan_min_steps is not None
+        assert self.pan_max_steps is not None
+        assert self.tilt_min_steps is not None
+        assert self.tilt_max_steps is not None
+        return (
+            self.pan_min_steps < self.pan_max_steps
+            and self.tilt_min_steps < self.tilt_max_steps
+        )
+
+
+@dataclass(frozen=True)
+class LimitEvent:
+    """One observed LIMIT serial event from the Arduino controller."""
+
+    axis: LimitAxis
+    direction: LimitDirection
+    received_utc: str
+
+    @property
+    def switch_key(self) -> str:
+        return f"{self.axis.value}_{self.direction.value}"
+
+    @classmethod
+    def required_switch_keys(cls) -> set[str]:
+        return {
+            "PAN_LEFT",
+            "PAN_RIGHT",
+            "TILT_DOWN",
+            "TILT_UP",
+        }
+
+
+@dataclass(frozen=True)
+class SafetyStatus:
+    """Authoritative motion-safety status published to operator clients."""
+
+    sentry_id: str
+    housing_profile: HousingProfile
+    protection_mode: ProtectionMode
+    motion_allowed: bool
+    motion_block_reason: str | None
+    validated_switches: list[str] = field(default_factory=list)
+    timestamp_utc: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "sentry_id": self.sentry_id,
+            "housing_profile": self.housing_profile.value,
+            "protection_mode": self.protection_mode.value,
+            "motion_allowed": self.motion_allowed,
+            "motion_block_reason": self.motion_block_reason,
+            "validated_switches": self.validated_switches,
+            "timestamp_utc": self.timestamp_utc,
+        }
 
 
 # ---------------------------------------------------------------------------

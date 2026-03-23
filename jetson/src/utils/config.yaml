@@ -299,6 +299,40 @@ PID_MAX_INTEGRAL:
 # ---------------------------------------------------------------------------
 # Turret Limits
 # ---------------------------------------------------------------------------
+HOUSING_PROFILE:
+  type: str
+  default: MVP
+  valid_range: TEST_BENCH | MVP
+  description: Per-unit housing profile persisted on the Jetson runtime; TEST_BENCH enables software-bound bypass and MVP requires physical limit-switch validation
+
+TEST_BENCH_PAN_MIN_STEPS:
+  type: int
+  default: null
+  unit: steps
+  valid_range: Any integer lower than TEST_BENCH_PAN_MAX_STEPS
+  description: Inclusive left pan bound used only when HOUSING_PROFILE=TEST_BENCH
+
+TEST_BENCH_PAN_MAX_STEPS:
+  type: int
+  default: null
+  unit: steps
+  valid_range: Any integer greater than TEST_BENCH_PAN_MIN_STEPS
+  description: Inclusive right pan bound used only when HOUSING_PROFILE=TEST_BENCH
+
+TEST_BENCH_TILT_MIN_STEPS:
+  type: int
+  default: null
+  unit: steps
+  valid_range: Any integer lower than TEST_BENCH_TILT_MAX_STEPS
+  description: Inclusive lower tilt bound used only when HOUSING_PROFILE=TEST_BENCH
+
+TEST_BENCH_TILT_MAX_STEPS:
+  type: int
+  default: null
+  unit: steps
+  valid_range: Any integer greater than TEST_BENCH_TILT_MIN_STEPS
+  description: Inclusive upper tilt bound used only when HOUSING_PROFILE=TEST_BENCH
+
 PAN_LIMIT_WARN_STEPS:
   type: int
   default: 4500
@@ -476,6 +510,11 @@ MQTT_TOPIC:
   type: str
   default: sentry/telemetry
   description: MQTT topic for telemetry record publication
+
+MQTT_STATUS_TOPIC:
+  type: str
+  default: sentry/status
+  description: MQTT topic for authoritative runtime safety-status publication
 
 MQTT_COMMAND_TOPIC:
   type: str

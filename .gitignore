@@ -61,3 +61,15 @@ Thumbs.db
 # Node (if any tooling added)
 node_modules/
 .DS_Store
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+app/.dart_tool/
+app/build/
+
+# PlatformIO
+.pio/
+arduino/sentry_turret/.pio/

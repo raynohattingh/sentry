@@ -9,6 +9,13 @@ for documentation of every parameter with units, valid ranges, and defaults.
 
 import os
 
+
+def _get_optional_int(name: str) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return None
+    return int(raw)
+
 # ---------------------------------------------------------------------------
 # Hardware — Serial
 # ---------------------------------------------------------------------------
@@ -101,6 +108,11 @@ PID_MAX_INTEGRAL: float = 500.0
 # Turret Limits
 # ---------------------------------------------------------------------------
 
+HOUSING_PROFILE: str = os.environ.get("HOUSING_PROFILE", "MVP").upper()
+TEST_BENCH_PAN_MIN_STEPS: int | None = _get_optional_int("TEST_BENCH_PAN_MIN_STEPS")
+TEST_BENCH_PAN_MAX_STEPS: int | None = _get_optional_int("TEST_BENCH_PAN_MAX_STEPS")
+TEST_BENCH_TILT_MIN_STEPS: int | None = _get_optional_int("TEST_BENCH_TILT_MIN_STEPS")
+TEST_BENCH_TILT_MAX_STEPS: int | None = _get_optional_int("TEST_BENCH_TILT_MAX_STEPS")
 PAN_LIMIT_WARN_STEPS: int = 4500
 PAN_LIMIT_HARD_STEPS: int = 5000
 TILT_LIMIT_WARN_STEPS: int = 900
@@ -155,6 +167,7 @@ TELEMETRY_BACKUP_COUNT: int = 5
 MQTT_BROKER: str = os.environ.get("MQTT_BROKER", "localhost")
 MQTT_PORT: int = int(os.environ.get("MQTT_PORT", "8883"))
 MQTT_TOPIC: str = os.environ.get("MQTT_TOPIC", "sentry/telemetry")
+MQTT_STATUS_TOPIC: str = os.environ.get("MQTT_STATUS_TOPIC", "sentry/status")
 MQTT_COMMAND_TOPIC: str = os.environ.get("MQTT_COMMAND_TOPIC", "sentry/command")
 MQTT_USERNAME: str = os.environ.get("MQTT_USERNAME", "")
 MQTT_PASSWORD: str = os.environ.get("MQTT_PASSWORD", "")

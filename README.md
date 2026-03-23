@@ -53,7 +53,7 @@ Farm Sentry is an **early-warning tactical surveillance system**, not a standard
  └──────────┘     └─────────────────────────────────────┘◄──────────────► Mobile App
   Pan / Tilt                                                                (Flutter)
   Stepper Motors
-  Limit Switches
+  Limit Switches (required for MVP, optional for test bench)
   Laser Rangefinder
 ```
 
@@ -65,8 +65,9 @@ Farm Sentry is an **early-warning tactical surveillance system**, not a standard
 |-------|-----------|----------------|
 | Vision | YOLOv8n (TensorRT) + CentroidTracker | Detect and track person-class targets at 25 fps |
 | Control | SentryBrain FSM + dual PID | Map threat tier to turret velocity; pan/tilt closed-loop tracking |
-| Hardware I/O | ArduinoLink (serial) | Send velocity commands; receive position heartbeats and LRF readings |
+| Hardware I/O | ArduinoLink (serial) | Send velocity commands; receive position heartbeats, LRF readings, and `LIMIT` events |
 | Telemetry | TelemetryRecorder + MQTTPublisher | Serialise TelemetryRecord to JSON-lines log and MQTT |
+| Safety | TurretManager + MQTTPublisher | Enforce housing-profile safety rules and publish authoritative runtime safety status |
 | Comms | CommandSubscriber (MQTT) | Receive joystick ManualCommand from mobile app; drive TurretManager |
 | Web HUD | Flask + OpenCV MJPEG | Serve annotated video stream at `http://<jetson>:5000/video` |
 | Mobile | Flutter + Riverpod + flutter_map | Tactical map, alerts, on-demand video, manual joystick override |
@@ -183,7 +184,8 @@ J. Update Flask MJPEG overlay frame
 | `vision/tracker.py` | `CentroidTracker` | Persistent IDs; emits `TrackedTarget` with pixel velocity |
 | `control/threat_tracker.py` | `ThreatScorer` | Weighted score (distance 40%, motion 30%, grouping 20%, time-of-day 10%) |
 | `control/sentry_brain.py` | `SentryBrain` | FSM + dwell timers + override API |
-| `hardware/arduino_link.py` | `ArduinoLink` | Serial bridge; sends `V <pan> <tilt>\n` and `L\n` |
+| `control/turret_manager.py` | `TurretManager` | Applies test-bench software bounds or MVP hardware-validation gating |
+| `hardware/arduino_link.py` | `ArduinoLink` | Serial bridge; sends `V <pan> <tilt>\n`, `L\n`, and tracks validated `LIMIT` events |
 | `comms/mqtt.py` | `MQTTPublisher` | Async TLS MQTT publish queue (daemon thread) |
 | `comms/mqtt.py` | `CommandSubscriber` | Subscribes to `sentry/command`; validates, rate-limits, dispatches |
 | `telemetry/recorder.py` | `TelemetryRecorder` | Builds `TelemetryRecord`; converts pixel velocity → m/s; emits to MQTT + log |
@@ -239,11 +241,11 @@ A **dark, tactical-first** mobile app for iOS and Android. Data is map-centric; 
 
 | Route | Screen | Purpose |
 |-------|--------|---------|
-| `/` (home) | **Map HUD** | Full-screen tactical map; live threat markers; alert panel; FSM status badge; connection status bar |
+| `/` (home) | **Map HUD** | Full-screen tactical map; live threat markers; alert panel; FSM status badge; connection status bar; safety banner when bypass or MVP block is active |
 | `/setup` | **Setup** | Pair with sentry: MQTT broker host, port, credentials, Sentry ID, video stream URL |
 | `/calibration` | **Calibration** | Pin sentry GPS position; set True North offset for accurate coordinate mapping |
-| `/override` | **Manual Override** | Virtual joystick → publishes `ManualCommand` to `sentry/command` at 10 Hz |
-| `/settings` | **Settings** | Notification thresholds; alert log retention period |
+| `/override` | **Manual Override** | Virtual joystick → publishes `ManualCommand` to `sentry/command` at 10 Hz; shows reduced-safety or blocked-motion messaging |
+| `/settings` | **Settings** | Notification thresholds; alert log retention period; current housing / protection summary |
 
 **Map features:**
 
@@ -312,6 +314,31 @@ Published by the mobile app Override screen at up to 10 Hz. Rate-limited to 20 H
 
 > Velocities are in **steps/sec** (Jetson steps per second — same unit as the PID output). Max magnitude is `±200.0` (configurable via `kMaxJoystickVelocity` in the app). The `CommandSubscriber` validates `sentry_id`, rate-limits, and automatically stops the turret after 3 seconds of silence (`COMMAND_SAFETY_TIMEOUT_S`).
 
+### `sentry/status` — Outbound (Jetson → App)
+
+Published at startup and whenever the motion-safety state changes.
+
+```json
+{
+  "sentry_id": "my-sentry-001",
+  "housing_profile": "TEST_BENCH",
+  "protection_mode": "SOFT_LIMIT_BYPASS",
+  "motion_allowed": true,
+  "motion_block_reason": null,
+  "validated_switches": [],
+  "timestamp_utc": "2026-03-23T17:00:00Z"
+}
+```
+
+Common values:
+
+- `housing_profile`: `TEST_BENCH` or `MVP`
+- `protection_mode`: `SOFT_LIMIT_BYPASS`, `HARDWARE_VALIDATION_PENDING`, or `HARDWARE_LIMITS_ACTIVE`
+- `motion_block_reason`: `INVALID_TEST_BENCH_BOUNDS` or `LIMIT_SWITCH_VALIDATION_REQUIRED`
+- `validated_switches`: distinct switch hits seen this boot, e.g. `PAN_LEFT`, `PAN_RIGHT`
+
+The mobile app treats `sentry/status` as the authority for the map safety banner, override-screen blocking state, and settings summary.
+
 ---
 
 ## Serial Protocol Reference
@@ -343,7 +370,7 @@ Communication between the **Jetson** and **Arduino** over USB-CDC at 115200 baud
 - USB thermal/optical camera (V4L2-compatible, e.g. `/dev/video0`)
 - Arduino Uno R3 + CNC Shield V3 + 2× A4988 or DRV8825 stepper drivers
 - 2× NEMA stepper motors (pan and tilt axes)
-- 4× normally-open limit switches (pan-left, pan-right, tilt-up, tilt-down)
+- 4× normally-open limit switches (pan-left, pan-right, tilt-up, tilt-down) for MVP housing
 - Laser rangefinder module with binary serial protocol (8-byte frame, 0x55 0xAA sync)
 - MQTT broker accessible by both the Jetson and the mobile device (e.g. Mosquitto on your local network)
 
@@ -388,6 +415,13 @@ pio test --environment native
 
 ### Step 2 — Deploy the Jetson Core
 
+Before launching, choose the housing profile for the unit you are commissioning:
+
+| Profile | When to use it | Required config | Runtime behavior |
+|---------|----------------|-----------------|------------------|
+| `TEST_BENCH` | Initial bench housing with no physical limit switches installed yet | `HOUSING_PROFILE=TEST_BENCH` plus all four `TEST_BENCH_*_STEPS` bounds | Motion is allowed only inside the configured software envelope. `sentry/status` reports `SOFT_LIMIT_BYPASS`. |
+| `MVP` | Production-style housing with real physical limit switches | `HOUSING_PROFILE=MVP` | Motion stays blocked until Jetson sees all four `LIMIT` events: `PAN LEFT`, `PAN RIGHT`, `TILT DOWN`, `TILT UP`. |
+
 #### Option A — Docker (recommended)
 
 ```bash
@@ -399,6 +433,11 @@ export MQTT_BROKER=192.168.1.100   # IP of your MQTT broker
 export MQTT_PORT=8883
 export MQTT_USERNAME=sentry
 export MQTT_PASSWORD=changeme
+export HOUSING_PROFILE=TEST_BENCH
+export TEST_BENCH_PAN_MIN_STEPS=-4000
+export TEST_BENCH_PAN_MAX_STEPS=4000
+export TEST_BENCH_TILT_MIN_STEPS=-900
+export TEST_BENCH_TILT_MAX_STEPS=900
 
 # Build and start
 docker compose -f docker/docker-compose.yaml up --build -d
@@ -420,10 +459,33 @@ SENTRY_ID=my-sentry-001 \
 MQTT_BROKER=192.168.1.100 \
 MQTT_USERNAME=sentry \
 MQTT_PASSWORD=changeme \
+HOUSING_PROFILE=TEST_BENCH \
+TEST_BENCH_PAN_MIN_STEPS=-4000 \
+TEST_BENCH_PAN_MAX_STEPS=4000 \
+TEST_BENCH_TILT_MIN_STEPS=-900 \
+TEST_BENCH_TILT_MAX_STEPS=900 \
 python3 main.py
 ```
 
 **Verify:** The Jetson logs should show `[SYSTEM] Sentry Core Online.` and you should see `[MQTT] Connected to broker` messages. The web HUD will be available at `http://<jetson-ip>:5000/video` (login: `sentry` / `changeme`).
+
+#### Using the new housing profiles
+
+For the current test bench with no switches installed:
+
+1. Set `HOUSING_PROFILE=TEST_BENCH`.
+2. Set all four software bounds: `TEST_BENCH_PAN_MIN_STEPS`, `TEST_BENCH_PAN_MAX_STEPS`, `TEST_BENCH_TILT_MIN_STEPS`, and `TEST_BENCH_TILT_MAX_STEPS`.
+3. Start the Jetson runtime.
+4. Confirm `sentry/status` reports `SOFT_LIMIT_BYPASS` and `motion_allowed=true`.
+
+For the later MVP housing with physical switches:
+
+1. Set `HOUSING_PROFILE=MVP`.
+2. Start the Jetson runtime.
+3. Manually actuate each switch once so Jetson observes `PAN LEFT`, `PAN RIGHT`, `TILT DOWN`, and `TILT UP`.
+4. Confirm `sentry/status` transitions from `HARDWARE_VALIDATION_PENDING` to `HARDWARE_LIMITS_ACTIVE`.
+
+> In `TEST_BENCH`, missing or inverted software bounds block motion and publish `motion_block_reason=INVALID_TEST_BENCH_BOUNDS`. In `MVP`, motion remains blocked until all four switches are validated.
 
 ---
 
@@ -459,6 +521,9 @@ sudo systemctl restart mosquitto
 ```bash
 # Subscribe in one terminal
 mosquitto_sub -h localhost -p 8883 --cafile ca.crt -u sentry -P changeme -t "sentry/telemetry"
+
+# In another terminal, watch safety status
+mosquitto_sub -h localhost -p 8883 --cafile ca.crt -u sentry -P changeme -t "sentry/status"
 
 # The Jetson will start publishing once it detects targets
 ```
@@ -528,7 +593,13 @@ All values in `config.py` can be overridden with environment variables. The foll
 | `MQTT_USERNAME` | `""` | **Yes** | MQTT broker username |
 | `MQTT_PASSWORD` | `""` | **Yes** | MQTT broker password |
 | `MQTT_TOPIC` | `sentry/telemetry` | No | Outbound telemetry topic |
+| `MQTT_STATUS_TOPIC` | `sentry/status` | No | Outbound safety-status topic used by the app warnings and motion-gating UI |
 | `MQTT_COMMAND_TOPIC` | `sentry/command` | No | Inbound manual command topic |
+| `HOUSING_PROFILE` | `MVP` | No | `TEST_BENCH` enables software-bound bypass; `MVP` requires physical limit-switch validation |
+| `TEST_BENCH_PAN_MIN_STEPS` | `None` | For `TEST_BENCH` | Inclusive minimum pan step bound for the temporary bypass |
+| `TEST_BENCH_PAN_MAX_STEPS` | `None` | For `TEST_BENCH` | Inclusive maximum pan step bound for the temporary bypass |
+| `TEST_BENCH_TILT_MIN_STEPS` | `None` | For `TEST_BENCH` | Inclusive minimum tilt step bound for the temporary bypass |
+| `TEST_BENCH_TILT_MAX_STEPS` | `None` | For `TEST_BENCH` | Inclusive maximum tilt step bound for the temporary bypass |
 | `SERIAL_PORT` | `/dev/ttyUSB0` | No | Arduino USB serial device path |
 | `MODEL_PATH` | `yolov8n.engine` | No | Path to TensorRT .engine model file |
 | `TELEMETRY_LOG_PATH` | `/app/logs/telemetry.jsonl` | No | Rotating JSON-lines telemetry log |
@@ -540,6 +611,13 @@ All values in `config.py` can be overridden with environment variables. The foll
 | `HUD_PASSWORD` | `changeme` | No | HTTP Basic Auth password for the web HUD — **change before deployment** |
 
 > See `jetson/src/utils/config.yaml` for the full reference including all PID gains, threat thresholds, turret limits, and scan sweep parameters.
+
+#### Safety-profile usage notes
+
+- Use `TEST_BENCH` only for the temporary bench housing that does not yet include physical limit switches.
+- In `TEST_BENCH`, all four software bounds must be set and must satisfy `min < max` on both axes.
+- In `MVP`, the Arduino wire protocol does not change; Jetson simply consumes the existing `LIMIT` events as commissioning evidence.
+- The mobile app does not infer safety locally. It reads `sentry/status` and surfaces the result on the map, override, and settings screens.
 
 ### Arduino Hardware Pins
 
@@ -593,6 +671,8 @@ SENTRY_ID=test python3 -m pytest tests/unit/ -v
 SENTRY_ID=test python3 -m pytest tests/unit/test_fsm_brain.py -v
 SENTRY_ID=test python3 -m pytest tests/unit/test_command_subscriber.py -v
 SENTRY_ID=test python3 -m pytest tests/unit/test_telemetry_enrichment.py -v
+SENTRY_ID=test python3 -m pytest tests/unit/test_turret_manager.py -v
+SENTRY_ID=test python3 -m pytest tests/unit/test_safety_status.py -v
 ```
 
 > Note: `test_camera.py` and `test_serial_io.py` require `cv2` / `pyserial` hardware libraries and will fail without them — this is expected in a CI / development environment.

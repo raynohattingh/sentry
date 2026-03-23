@@ -5,17 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
 import '../../models/connection_state.dart';
 import '../../services/mqtt_service.dart';
+import 'telemetry_provider.dart';
 
 /// Provider for [ConnectionStateNotifier].
 final connectionStateProvider =
     StateNotifierProvider<ConnectionStateNotifier, SentryConnectionState>(
-  (ref) => ConnectionStateNotifier(ref.read(_mqttServiceProvider)),
+  (ref) => ConnectionStateNotifier(ref.read(mqttServiceProvider)),
 );
-
-// Internal — replace with real provider once wired in T033
-final _mqttServiceProvider = Provider<MqttService>((ref) {
-  throw UnimplementedError('Wire MqttService provider in main');
-});
 
 /// Manages heartbeat and connection state transitions.
 ///

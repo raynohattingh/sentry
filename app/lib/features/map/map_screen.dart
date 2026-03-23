@@ -7,11 +7,13 @@ import 'package:latlong2/latlong.dart';
 
 import '../../core/theme.dart';
 import '../../features/alerts/alert_panel.dart';
+import '../../models/safety_status.dart';
 import '../../features/video/video_modal.dart';
 import '../../features/setup/setup_provider.dart';
 import '../../models/connection_state.dart';
 import '../../models/sentry_config.dart';
 import 'connection_provider.dart';
+import 'telemetry_provider.dart';
 import 'widgets/connection_status_bar.dart';
 import 'widgets/sentry_mode_badge.dart';
 import 'widgets/threat_marker_layer.dart';
@@ -50,6 +52,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Widget build(BuildContext context) {
     final config = ref.watch(sentryConfigProvider);
     final connectionState = ref.watch(connectionStateProvider);
+    final safetyStatus = ref.watch(safetyStatusStreamProvider).valueOrNull;
 
     return Scaffold(
       backgroundColor: kColorBackground,
@@ -81,9 +84,30 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       body: Stack(
         children: [
           _buildMap(config),
-          Positioned(top: 0, left: 0, right: 0,
-              child: const ConnectionStatusBar()),
-          Positioned(top: 48, right: 12, child: const SentryModeBadge()),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const ConnectionStatusBar(),
+                if (safetyStatus != null &&
+                    (safetyStatus.housingProfile == HousingProfile.testBench ||
+                        !safetyStatus.motionAllowed))
+                  _buildSafetyBanner(safetyStatus),
+              ],
+            ),
+          ),
+          Positioned(
+            top: safetyStatus != null &&
+                    (safetyStatus.housingProfile == HousingProfile.testBench ||
+                        !safetyStatus.motionAllowed)
+                ? 88
+                : 48,
+            right: 12,
+            child: const SentryModeBadge(),
+          ),
           if (!_locationPermission)
             Positioned(
               bottom: _alertPanelOpen ? 320 : 0,
@@ -161,6 +185,29 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               style: TextStyle(color: kColorMed)),
         ),
       ],
+    );
+  }
+
+  Widget _buildSafetyBanner(SafetyStatusRecord status) {
+    final bool isTestBench = status.housingProfile == HousingProfile.testBench;
+    final Color bannerColor = isTestBench ? kColorAmber : kColorHigh;
+    final String message = isTestBench
+        ? '[SAFETY] Test bench bypass active — software bounds only'
+        : '[SAFETY] MVP validation required — ${status.validatedSwitches.length}/4 switches seen';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: bannerColor.withValues(alpha: 0.9),
+      child: Text(
+        message,
+        style: const TextStyle(
+          color: Colors.black,
+          fontFamily: 'RobotoMono',
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
