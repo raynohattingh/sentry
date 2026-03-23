@@ -127,6 +127,18 @@ def main() -> None:
     link = ArduinoLink()
     link.connect()
 
+    from control.turret_manager import TurretManager
+
+    turret = TurretManager(hardware=link)
+    logger.info(
+        "[SAFETY] Startup profile=%s validation_state=%s motion_allowed=%s",
+        turret.housing_profile.value,
+        turret.validation_state.value,
+        turret.motion_allowed,
+    )
+    if turret.motion_block_reason is not None:
+        logger.warning("[SAFETY] Motion blocked: %s", turret.motion_block_reason)
+
     # PID controllers (owned here for direct error injection from camera)
     from control.pid import PIDController
 
@@ -140,6 +152,7 @@ def main() -> None:
     from telemetry.recorder import TelemetryRecorder
 
     mqtt_pub = MQTTPublisher()
+    status_pub = MQTTPublisher(topic=config.MQTT_STATUS_TOPIC)
     recorder = TelemetryRecorder(session_id=session_id, mqtt=mqtt_pub)
 
     # Web HUD
@@ -151,6 +164,17 @@ def main() -> None:
     # Boot counter reset — we reached the main loop successfully.
     _reset_boot_failures()
     logger.info("[SYSTEM] Sentry Core Online.")
+
+    last_safety_payload: str | None = None
+
+    def publish_safety_status() -> None:
+        nonlocal last_safety_payload
+        payload = json.dumps(turret.get_safety_status().to_dict())
+        if payload != last_safety_payload:
+            status_pub.publish_async(payload)
+            last_safety_payload = payload
+
+    publish_safety_status()
 
     # ---------------------------------------------------------------------------
     # Control loop
@@ -216,9 +240,10 @@ def main() -> None:
                 fire_lrf = command.fire_lrf
 
             # H. Send to Arduino.
-            link.send_velocity(final_pan, final_tilt)
+            turret.set_velocity(final_pan, final_tilt)
             if fire_lrf:
                 link.fire_lrf()
+            publish_safety_status()
 
             # I. Telemetry.
             for t in targets:

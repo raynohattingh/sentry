@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:sentry_mobile/services/mqtt_service.dart';
 import 'package:sentry_mobile/services/location_service.dart';
 import 'package:sentry_mobile/services/notification_service.dart';
+import 'package:sentry_mobile/models/safety_status.dart';
 import 'package:sentry_mobile/models/telemetry_record.dart';
 import 'package:sentry_mobile/models/connection_state.dart';
 
@@ -13,11 +14,17 @@ import 'package:sentry_mobile/models/connection_state.dart';
 class MockMqttService extends Mock implements MqttService {
   final StreamController<TelemetryRecord> _telemetryController =
       StreamController<TelemetryRecord>.broadcast();
+  final StreamController<SafetyStatusRecord> _safetyStatusController =
+      StreamController<SafetyStatusRecord>.broadcast();
   final StreamController<SentryConnectionState> _connectionController =
       StreamController<SentryConnectionState>.broadcast();
 
   @override
   Stream<TelemetryRecord> get telemetryStream => _telemetryController.stream;
+
+  @override
+  Stream<SafetyStatusRecord> get safetyStatusStream =>
+      _safetyStatusController.stream;
 
   @override
   Stream<SentryConnectionState> get connectionStream =>
@@ -31,8 +38,13 @@ class MockMqttService extends Mock implements MqttService {
   void emitConnectionState(SentryConnectionState state) =>
       _connectionController.add(state);
 
+  /// Injects a [SafetyStatusRecord] into the stream.
+  void emitSafetyStatus(SafetyStatusRecord status) =>
+      _safetyStatusController.add(status);
+
   void dispose() {
     _telemetryController.close();
+    _safetyStatusController.close();
     _connectionController.close();
   }
 }

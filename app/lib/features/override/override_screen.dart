@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../features/map/connection_provider.dart';
 import '../../features/setup/setup_provider.dart';
 import '../../models/connection_state.dart';
+import '../../models/safety_status.dart';
 import '../../models/manual_command.dart';
 import '../../services/mqtt_service.dart';
 import '../map/telemetry_provider.dart';
@@ -72,6 +73,8 @@ class _OverrideScreenState extends ConsumerState<OverrideScreen> {
   Widget build(BuildContext context) {
     final connectionState = ref.watch(connectionStateProvider);
     final isOnline = connectionState == SentryConnectionState.online;
+    final safetyStatus = ref.watch(safetyStatusStreamProvider).valueOrNull;
+    final motionAllowed = safetyStatus?.motionAllowed ?? true;
     final config = ref.watch(sentryConfigProvider);
 
     return Scaffold(
@@ -100,9 +103,14 @@ class _OverrideScreenState extends ConsumerState<OverrideScreen> {
                   ),
                 ),
               ),
+            if (safetyStatus != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 24),
+                child: _buildSafetyNotice(safetyStatus),
+              ),
             JoystickWidget(
               sentryId: config.sentryId,
-              disabled: !isOnline,
+              disabled: !isOnline || !motionAllowed,
               onCommandChanged: (cmd) {
                 _onCommandChanged(cmd);
                 if (cmd.panVelocity == 0.0 && cmd.tiltVelocity == 0.0) {
@@ -112,9 +120,9 @@ class _OverrideScreenState extends ConsumerState<OverrideScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              isOnline ? 'DRAG TO CONTROL' : 'OFFLINE',
+              isOnline && motionAllowed ? 'DRAG TO CONTROL' : 'CONTROL BLOCKED',
               style: TextStyle(
-                color: isOnline ? Colors.white38 : kColorOffline,
+                color: isOnline && motionAllowed ? Colors.white38 : kColorOffline,
                 fontFamily: 'RobotoMono',
                 fontSize: 11,
                 letterSpacing: 2,
@@ -122,6 +130,35 @@ class _OverrideScreenState extends ConsumerState<OverrideScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSafetyNotice(SafetyStatusRecord status) {
+    final bool isTestBench = status.housingProfile == HousingProfile.testBench;
+    final bool blocked = !status.motionAllowed;
+    final Color color = blocked ? kColorHigh : kColorAmber;
+    final String message = blocked
+        ? '[SAFETY] Motion blocked — validate all four limit switches (${status.validatedSwitches.length}/4)'
+        : isTestBench
+            ? '[SAFETY] Reduced safety active — movement limited by configured software bounds'
+            : '[SAFETY] Hardware limit protection active';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color),
+      ),
+      child: Text(
+        message,
+        style: TextStyle(
+          color: blocked ? kColorHigh : kColorAmber,
+          fontFamily: 'RobotoMono',
+          fontSize: 12,
+        ),
+        textAlign: TextAlign.center,
       ),
     );
   }

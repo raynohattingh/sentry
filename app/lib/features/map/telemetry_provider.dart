@@ -5,16 +5,31 @@ import 'package:latlong2/latlong.dart';
 
 import '../../core/constants.dart';
 import '../../models/connection_state.dart';
+import '../../models/safety_status.dart';
 import '../../models/sentry_config.dart';
 import '../../models/telemetry_record.dart';
 import '../../models/threat_marker.dart';
 import '../../services/location_service.dart';
 import '../../services/mqtt_service.dart';
 import '../../utils/geo_utils.dart';
+import '../setup/setup_provider.dart';
 
 /// Provider for the MQTT service — override in tests and in DI root.
 final mqttServiceProvider = Provider<MqttService>((ref) {
-  throw UnimplementedError('Provide MqttService in ProviderScope overrides');
+  final service = MqttServiceImpl();
+  ref.listen<SentryConfig>(
+    sentryConfigProvider,
+    (_, next) {
+      if (next.isConfigured) {
+        unawaited(service.connect(next));
+      }
+    },
+    fireImmediately: true,
+  );
+  ref.onDispose(() {
+    unawaited(service.disconnect());
+  });
+  return service;
 });
 
 /// Provider for the location service.
@@ -30,6 +45,12 @@ final sentryConfigForMapProvider = Provider<SentryConfig>((ref) {
 final telemetryStreamProvider = StreamProvider<TelemetryRecord>((ref) {
   final mqtt = ref.watch(mqttServiceProvider);
   return mqtt.telemetryStream;
+});
+
+/// Stream provider for authoritative safety status records.
+final safetyStatusStreamProvider = StreamProvider<SafetyStatusRecord>((ref) {
+  final mqtt = ref.watch(mqttServiceProvider);
+  return mqtt.safetyStatusStream;
 });
 
 /// Notifier managing the map of live threat markers.

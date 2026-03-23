@@ -18,10 +18,11 @@ import datetime
 import logging
 import threading
 import time
+from typing import Union
 
 import config
 from comms.serial_io import SerialPort, SerialProtocol, parse_frame
-from sentry_types import LRFReading, TurretPosition
+from sentry_types import LRFReading, LimitEvent, TurretPosition
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ class ArduinoLink:
             received_utc=datetime.datetime.utcnow().isoformat() + "Z",
         )
         self._lrf_reading: LRFReading | None = None
+        self._last_limit_event: LimitEvent | None = None
+        self._validated_switches: set[str] = set()
         self._last_pos_received_ns: int = 0
         self._read_thread: threading.Thread | None = None
         self._running: bool = False
@@ -100,16 +103,29 @@ class ArduinoLink:
                     time.sleep(0.001)
                     continue
                 parsed = parse_frame(line)
-                if isinstance(parsed, TurretPosition):
-                    with self._lock:
-                        self._position = parsed
-                        self._last_pos_received_ns = time.monotonic_ns()
-                elif isinstance(parsed, LRFReading):
-                    with self._lock:
-                        self._lrf_reading = parsed
+                self._handle_parsed_frame(parsed)
             except Exception as exc:
                 logger.warning("[SERIAL] Read error: %s", exc)
                 time.sleep(0.01)
+
+    def _handle_parsed_frame(
+        self,
+        parsed: Union[LRFReading, LimitEvent, TurretPosition, None],
+    ) -> None:
+        if isinstance(parsed, TurretPosition):
+            with self._lock:
+                self._position = parsed
+                self._last_pos_received_ns = time.monotonic_ns()
+            return
+        if isinstance(parsed, LRFReading):
+            with self._lock:
+                self._lrf_reading = parsed
+            return
+        if isinstance(parsed, LimitEvent):
+            with self._lock:
+                self._last_limit_event = parsed
+                self._validated_switches.add(parsed.switch_key)
+            logger.info("[SERIAL] Limit event observed: %s", parsed.switch_key)
 
     # ------------------------------------------------------------------
     # Command senders
@@ -221,6 +237,29 @@ class ArduinoLink:
         """
         with self._lock:
             return self._lrf_reading
+
+    @property
+    def last_limit_event(self) -> LimitEvent | None:
+        with self._lock:
+            return self._last_limit_event
+
+    @property
+    def validated_switches(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(sorted(self._validated_switches))
+
+    def is_switch_validated(self, switch_key: str) -> bool:
+        with self._lock:
+            return switch_key in self._validated_switches
+
+    def all_required_switches_validated(self) -> bool:
+        with self._lock:
+            return LimitEvent.required_switch_keys().issubset(self._validated_switches)
+
+    def reset_limit_validation(self) -> None:
+        with self._lock:
+            self._last_limit_event = None
+            self._validated_switches.clear()
 
     def stop(self) -> None:
         """Stop the read thread and close the serial connection."""

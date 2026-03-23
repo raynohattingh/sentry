@@ -16,12 +16,14 @@ import re
 from typing import Protocol, runtime_checkable
 
 import config
-from sentry_types import LRFReading, TurretPosition
+from sentry_types import LRFReading, LimitAxis, LimitDirection, LimitEvent, TurretPosition
 
 logger = logging.getLogger(__name__)
 
 # Pre-compiled regex for valid serial frames.
-_FRAME_RE = re.compile(r"^(DIST \d+(\.\d+)?|POS -?\d+ -?\d+)$")
+_FRAME_RE = re.compile(
+    r"^(DIST \d+(\.\d+)?|POS -?\d+ -?\d+|LIMIT (PAN|TILT) (LEFT|RIGHT|UP|DOWN))$"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +31,7 @@ _FRAME_RE = re.compile(r"^(DIST \d+(\.\d+)?|POS -?\d+ -?\d+)$")
 # ---------------------------------------------------------------------------
 
 
-def parse_frame(line: str) -> LRFReading | TurretPosition | None:
+def parse_frame(line: str) -> LRFReading | LimitEvent | TurretPosition | None:
     """Parse a raw serial line into a typed object.
 
     Args:
@@ -54,12 +56,22 @@ def parse_frame(line: str) -> LRFReading | TurretPosition | None:
         if line.startswith("POS"):
             _, pan, tilt = line.split()
             return TurretPosition(pan_steps=int(pan), tilt_steps=int(tilt), received_utc=now)
+        if line.startswith("LIMIT"):
+            _, axis, direction = line.split()
+            return LimitEvent(
+                axis=LimitAxis(axis),
+                direction=LimitDirection(direction),
+                received_utc=now,
+            )
 
     # Frame does not match any known pattern.
     if line.startswith("DIST"):
         # Looks like a DIST command but is malformed.
         logger.warning("[SERIAL] Malformed frame discarded: %s", line)
         return LRFReading(distance_m=None, valid=False, received_utc=now)
+    if line.startswith("LIMIT"):
+        logger.warning("[SERIAL] Malformed frame discarded: %s", line)
+        return None
 
     logger.warning("[SERIAL] Malformed frame discarded: %s", line)
     return None

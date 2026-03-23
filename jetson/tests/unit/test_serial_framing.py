@@ -12,7 +12,7 @@ import sys, os, time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
 import pytest
-from sentry_types import LRFReading, TurretPosition
+from sentry_types import LRFReading, LimitAxis, LimitDirection, LimitEvent, TurretPosition
 
 
 def _get_parsers():
@@ -34,6 +34,15 @@ def test_pos_parses_correctly():
     assert isinstance(result, TurretPosition)
     assert result.pan_steps == 1000
     assert result.tilt_steps == -250
+
+
+def test_limit_parses_correctly():
+    parse_frame = _get_parsers()
+    result = parse_frame("LIMIT PAN LEFT")
+    assert isinstance(result, LimitEvent)
+    assert result.axis == LimitAxis.PAN
+    assert result.direction == LimitDirection.LEFT
+    assert result.switch_key == "PAN_LEFT"
 
 
 def test_malformed_dist_returns_invalid(caplog):
@@ -59,3 +68,13 @@ def test_unknown_command_returns_none(caplog):
     with caplog.at_level(logging.WARNING):
         result = parse_frame("FOO 123")
     assert result is None
+
+
+def test_malformed_limit_returns_none(caplog):
+    import logging
+    parse_frame = _get_parsers()
+    with caplog.at_level(logging.WARNING):
+        result = parse_frame("LIMIT PAN SIDEWAYS")
+    assert result is None
+    assert any("[SERIAL]" in r.getMessage() and "Malformed" in r.getMessage()
+               for r in caplog.records)

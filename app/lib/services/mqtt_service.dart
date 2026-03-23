@@ -6,9 +6,14 @@ import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
 import '../models/manual_command.dart';
+import '../models/safety_status.dart';
 import '../models/telemetry_record.dart';
 import '../models/sentry_config.dart';
 import '../models/connection_state.dart';
+
+const String mqttTelemetryTopic = 'sentry/telemetry';
+const String mqttStatusTopic = 'sentry/status';
+const String mqttCommandTopic = 'sentry/command';
 
 /// Abstract MQTT service interface.
 abstract class MqttService {
@@ -16,6 +21,7 @@ abstract class MqttService {
   Future<void> disconnect();
   Future<void> publishCommand(ManualCommand command);
   Stream<TelemetryRecord> get telemetryStream;
+  Stream<SafetyStatusRecord> get safetyStatusStream;
   Stream<SentryConnectionState> get connectionStream;
 }
 
@@ -28,6 +34,8 @@ class MqttServiceImpl implements MqttService {
 
   final _telemetryController =
       StreamController<TelemetryRecord>.broadcast();
+  final _safetyStatusController =
+      StreamController<SafetyStatusRecord>.broadcast();
   final _connectionController =
       StreamController<SentryConnectionState>.broadcast();
 
@@ -38,6 +46,10 @@ class MqttServiceImpl implements MqttService {
 
   @override
   Stream<TelemetryRecord> get telemetryStream => _telemetryController.stream;
+
+  @override
+  Stream<SafetyStatusRecord> get safetyStatusStream =>
+      _safetyStatusController.stream;
 
   @override
   Stream<SentryConnectionState> get connectionStream =>
@@ -80,7 +92,8 @@ class MqttServiceImpl implements MqttService {
       if (client.connectionStatus?.state == MqttConnectionState.connected) {
         _client = client;
         _backoffSec = 2;
-        client.subscribe('sentry/telemetry', MqttQos.atLeastOnce);
+        client.subscribe(mqttTelemetryTopic, MqttQos.atLeastOnce);
+        client.subscribe(mqttStatusTopic, MqttQos.atLeastOnce);
         client.updates?.listen(_onMessage);
         _connectionController.add(SentryConnectionState.online);
       } else {
@@ -118,8 +131,13 @@ class MqttServiceImpl implements MqttService {
       final raw = utf8.decode(payload.toList());
       try {
         final json = jsonDecode(raw) as Map<String, dynamic>;
-        final record = TelemetryRecord.fromJson(json);
-        _telemetryController.add(record);
+        if (msg.topic == mqttStatusTopic) {
+          final status = SafetyStatusRecord.fromJson(json);
+          _safetyStatusController.add(status);
+        } else if (msg.topic == mqttTelemetryTopic) {
+          final record = TelemetryRecord.fromJson(json);
+          _telemetryController.add(record);
+        }
       } catch (_) {
         // Malformed payload — ignore
       }
@@ -136,7 +154,7 @@ class MqttServiceImpl implements MqttService {
     final payload = jsonEncode(command.toJson());
     final builder = MqttClientPayloadBuilder()..addString(payload);
     client.publishMessage(
-        'sentry/command', MqttQos.atLeastOnce, builder.payload!);
+        mqttCommandTopic, MqttQos.atLeastOnce, builder.payload!);
   }
 
   @override
@@ -146,6 +164,7 @@ class MqttServiceImpl implements MqttService {
     _client?.disconnect();
     _client = null;
     await _telemetryController.close();
+    await _safetyStatusController.close();
     await _connectionController.close();
   }
 }

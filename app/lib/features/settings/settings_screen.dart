@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
 import '../../models/notification_preferences.dart';
+import '../../models/safety_status.dart';
 import '../../models/threat_marker.dart';
+import '../map/telemetry_provider.dart';
 import 'settings_provider.dart';
 
 /// Settings screen — notifications, alert log retention, calibration link.
@@ -21,6 +23,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final prefs = ref.watch(notificationPreferencesProvider);
+    final safetyStatus = ref.watch(safetyStatusStreamProvider).valueOrNull;
 
     return Scaffold(
       backgroundColor: kColorBackground,
@@ -37,6 +40,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _retentionPicker(prefs),
           const SizedBox(height: 24),
           _sectionHeader('Sentry'),
+          if (safetyStatus != null) _safetySummaryTile(safetyStatus),
           ListTile(
             title: const Text('Calibration',
                 style: TextStyle(color: Colors.white)),
@@ -141,5 +145,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       case ThreatTier.low:
         return prefs.copyWith(lowMode: mode);
     }
+  }
+
+  Widget _safetySummaryTile(SafetyStatusRecord status) {
+    final String motionText = status.motionAllowed
+        ? 'ALLOWED'
+        : 'BLOCKED (${status.motionBlockReason ?? 'UNKNOWN'})';
+
+    return ListTile(
+      title: Text(
+        'Safety Profile: ${status.housingProfile.value}',
+        style: const TextStyle(color: Colors.white),
+      ),
+      subtitle: Text(
+        'Protection: ${status.protectionMode.value}\n'
+        'Motion: $motionText\n'
+        'Validated switches: ${status.validatedSwitches.length}/4',
+        style: const TextStyle(color: Colors.white54, fontSize: 12),
+      ),
+    );
   }
 }
