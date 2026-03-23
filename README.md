@@ -200,7 +200,7 @@ Runs on an **Arduino Uno R3 + CNC Shield V3** with A4988/DRV8825 stepper drivers
 **Responsibilities:**
 
 - Receive velocity commands (`V <pan> <tilt>\n`) from Jetson and drive stepper axes
-- Fire the laser rangefinder on demand (`L\n`) and report distance (`DIST <m>\n`)
+- Fire the laser rangefinder on demand (`L\n`), assert its active-LOW enable only for the active measurement window, and report distance (`DIST <m>\n`)
 - Broadcast turret position every 100 ms (`POS <pan_steps> <tilt_steps>\n`)
 - Enforce hardware limit switches — zero velocity immediately when triggered
 - Hardware Watchdog Timer (2-second timeout) to recover from any firmware hang
@@ -220,6 +220,7 @@ Runs on an **Arduino Uno R3 + CNC Shield V3** with A4988/DRV8825 stepper drivers
 | Limit Tilt Up | D12 | Off-shield header |
 | LRF RX | A0 (D14) | SoftwareSerial RX — laser rangefinder |
 | LRF TX | A1 (D15) | SoftwareSerial TX — laser rangefinder |
+| LRF ENABLE | A2 (D16) | Active-LOW enable — LOW powers the LRF only during active ranging |
 
 **Firmware modules:**
 
@@ -636,6 +637,9 @@ All pin assignments live in `arduino/sentry_turret/config.h`. To adapt to a diff
 | `LIMIT_TILT_UP_PIN` | D12 | Tilt-up limit switch |
 | `LRF_RX_PIN` | A0 | LRF SoftwareSerial RX |
 | `LRF_TX_PIN` | A1 | LRF SoftwareSerial TX |
+| `LRF_ENABLE_PIN` | A2 | LRF active-LOW enable control |
+| `LRF_ENABLE_ACTIVE_LEVEL` | `0` | LOW powers the LRF on |
+| `LRF_ENABLE_INACTIVE_LEVEL` | `1` | HIGH keeps the LRF idle-disabled |
 
 ### Mobile App Settings
 
@@ -796,8 +800,9 @@ GPS target coordinates will be wrong. Run the Calibration screen in the app and 
 ### LRF always returns -1.0
 
 1. Check SoftwareSerial wiring: LRF TX → Arduino A0, LRF RX → Arduino A1
-2. Verify LRF baud rate matches `LRF_SOFTSERIAL_BAUD` (default 115200)
-3. If framing errors persist, reduce to 57600 in `config.h` — no logic changes needed (see `CONSTRAINT-001` in `sentry_turret.ino`)
+2. Check the active-LOW enable wiring: Arduino A2 must drive the LRF enable input LOW only during ranging
+3. Verify LRF baud rate matches `LRF_SOFTSERIAL_BAUD` (default 115200)
+4. If framing errors persist, reduce to 57600 in `config.h` — no logic changes needed (see `CONSTRAINT-001` in `sentry_turret.ino`)
 
 ### Map shows threats at wrong location
 
