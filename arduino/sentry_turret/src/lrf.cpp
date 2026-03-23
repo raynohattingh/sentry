@@ -40,6 +40,15 @@ static float extractDistanceM(const uint8_t buf[8]) {
     return static_cast<float>(mm) / 1000.0f;
 }
 
+/** @brief Drive the enable signal to the requested power state. */
+static void applyPowerState(LrfPowerControl& control, bool enabled) {
+    if (control.digitalWriteFn != nullptr) {
+        control.digitalWriteFn(control.pin,
+                               enabled ? control.activeLevel : control.inactiveLevel);
+    }
+    control.enabled = enabled;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -50,8 +59,52 @@ void lrfInit(LrfReader& reader) {
     reader.active = false;
 }
 
+void lrfPowerInit(LrfPowerControl& control,
+                  uint8_t pin,
+                  uint8_t activeLevel,
+                  uint8_t inactiveLevel,
+                  LrfPinModeFn pinModeFn,
+                  LrfDigitalWriteFn digitalWriteFn) {
+    control.pin = pin;
+    control.activeLevel = activeLevel;
+    control.inactiveLevel = inactiveLevel;
+    control.measurementStartMs = 0;
+    control.measurementActive = false;
+    control.pinModeFn = pinModeFn;
+    control.digitalWriteFn = digitalWriteFn;
+
+    if (control.pinModeFn != nullptr) {
+        control.pinModeFn(control.pin, OUTPUT);
+    }
+
+    applyPowerState(control, false);
+}
+
 void lrfTrigger(Stream& serial) {
     serial.write(LRF_TRIGGER, LRF_FRAME_LEN);
+}
+
+void lrfBeginMeasurement(Stream& serial,
+                         LrfReader& reader,
+                         LrfPowerControl& control,
+                         unsigned long nowMs) {
+    lrfInit(reader);
+    control.measurementActive = true;
+    control.measurementStartMs = nowMs;
+    applyPowerState(control, true);
+    lrfTrigger(serial);
+}
+
+void lrfEndMeasurement(LrfReader& reader, LrfPowerControl& control) {
+    lrfInit(reader);
+    control.measurementActive = false;
+    control.measurementStartMs = 0;
+    applyPowerState(control, false);
+}
+
+bool lrfMeasurementTimedOut(const LrfPowerControl& control, unsigned long nowMs) {
+    return control.measurementActive &&
+           ((nowMs - control.measurementStartMs) >= LRF_READ_TIMEOUT_MS);
 }
 
 float lrfFeedByte(LrfReader& reader, uint8_t byte) {

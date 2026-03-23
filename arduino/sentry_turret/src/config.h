@@ -18,18 +18,11 @@
 #include <stdint.h>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Native-build fallbacks for Arduino analog-pin macros (Uno R3 numbering)
-// These are normally provided by Arduino.h; define them here for host GCC.
+// Common digital signal levels (Arduino-compatible numeric values)
 // ─────────────────────────────────────────────────────────────────────────────
 
-#ifdef NATIVE_ENV
-#  ifndef A0
-#    define A0 14
-#  endif
-#  ifndef A1
-#    define A1 15
-#  endif
-#endif
+static constexpr uint8_t SIGNAL_LEVEL_LOW  = 0;
+static constexpr uint8_t SIGNAL_LEVEL_HIGH = 1;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Serial Communication
@@ -115,13 +108,26 @@ static constexpr uint8_t LIMIT_DEBOUNCE_MS = 5;
 
 /** @brief LRF SoftwareSerial RX pin — Arduino analog A0 used as digital GPIO.
  *  Load-free; not used by CNC Shield V3.
- *  Units: Arduino analog pin number. Default: A0 (= 14 on Uno R3). */
-static constexpr uint8_t LRF_RX_PIN = A0;
+ *  Units: Arduino digital pin number. Default: 14 (= A0 on Uno R3). */
+static constexpr uint8_t LRF_RX_PIN = 14;
 
 /** @brief LRF SoftwareSerial TX pin — Arduino analog A1 used as digital GPIO.
  *  Load-free; not used by CNC Shield V3.
- *  Units: Arduino analog pin number. Default: A1 (= 15 on Uno R3). */
-static constexpr uint8_t LRF_TX_PIN = A1;
+ *  Units: Arduino digital pin number. Default: 15 (= A1 on Uno R3). */
+static constexpr uint8_t LRF_TX_PIN = 15;
+
+/** @brief LRF enable pin — Arduino analog A2 used as digital GPIO.
+ *  Active-LOW: driving this pin LOW powers the LRF on for a ranging window.
+ *  Units: Arduino digital pin number. Default: 16 (= A2 on Uno R3). */
+static constexpr uint8_t LRF_ENABLE_PIN = 16;
+
+/** @brief Logical level that powers the LRF on.
+ *  LOW is the documented active level for the attached LRF module. */
+static constexpr uint8_t LRF_ENABLE_ACTIVE_LEVEL = SIGNAL_LEVEL_LOW;
+
+/** @brief Logical level that deasserts LRF power while idle.
+ *  HIGH keeps the LRF disabled when no measurement is active. */
+static constexpr uint8_t LRF_ENABLE_INACTIVE_LEVEL = SIGNAL_LEVEL_HIGH;
 
 /** @brief Baud rate for the LRF SoftwareSerial link.
  *  CONSTRAINT-001: 115200 baud is at the upper reliability limit of

@@ -51,6 +51,7 @@ static LimitPin limitTiltUp;
 // CONSTRAINT-001: See file-level comment above regarding SoftwareSerial reliability.
 static SoftwareSerial lrfSerial(LRF_RX_PIN, LRF_TX_PIN);
 static LrfReader      lrfReader;
+static LrfPowerControl lrfPower;
 
 // --- Heartbeat ---
 static unsigned long lastHeartbeatMs = 0;
@@ -60,6 +61,19 @@ static bool prevPanLeft  = false;
 static bool prevPanRight = false;
 static bool prevTiltDown = false;
 static bool prevTiltUp   = false;
+
+/**
+ * @brief Drain any pending bytes from the LRF serial buffer and reset the parser.
+ *
+ * This prevents stale or late bytes from a previous measurement window from
+ * being misinterpreted as the start of a fresh ranging request.
+ */
+static void drainLrfSerial() {
+    while (lrfSerial.available()) {
+        (void)lrfSerial.read();
+    }
+    lrfInit(lrfReader);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: gate stepper velocity when any limit switch is triggered (FR-007)
@@ -116,7 +130,13 @@ void setup() {
     limitInit(limitTiltDown, LIMIT_TILT_DOWN_PIN);
     limitInit(limitTiltUp,   LIMIT_TILT_UP_PIN);
 
-    // --- LRF SoftwareSerial ---
+    // --- LRF power gating + SoftwareSerial ---
+    lrfPowerInit(lrfPower,
+                 LRF_ENABLE_PIN,
+                 LRF_ENABLE_ACTIVE_LEVEL,
+                 LRF_ENABLE_INACTIVE_LEVEL,
+                 pinMode,
+                 digitalWrite);
     lrfSerial.begin(LRF_SOFTSERIAL_BAUD);
     lrfInit(lrfReader);
 
@@ -130,7 +150,7 @@ void setup() {
                 (void)lrfSerial.read();  // Drain boot frame, result ignored.
             }
         }
-        lrfInit(lrfReader);  // Reset accumulator to clean state after drain.
+        lrfEndMeasurement(lrfReader, lrfPower);  // Recover to idle-disabled state.
     }
 
     // --- WDT: enable LAST in setup() (NFR-001) ---
@@ -162,9 +182,10 @@ void loop() {
                 break;
 
             case CMD_LASER:
-                // Send trigger frame; reply bytes arrive asynchronously in
-                // subsequent loop() iterations via the lrfSerial byte feed below.
-                lrfTrigger(lrfSerial);
+                // Start a fresh ranging window and discard any stale reply bytes
+                // before issuing the new on-demand trigger.
+                drainLrfSerial();
+                lrfBeginMeasurement(lrfSerial, lrfReader, lrfPower, millis());
                 break;
 
             case CMD_NONE:
@@ -176,17 +197,30 @@ void loop() {
 
     // ── LRF reply byte ingestion ─────────────────────────────────────────────
     while (lrfSerial.available()) {
+        const uint8_t lrfByte = static_cast<uint8_t>(lrfSerial.read());
+
+        if (!lrfPower.measurementActive) {
+            continue;  // Drop late/stale bytes when no ranging window is active.
+        }
+
         const float lrfResult = lrfFeedByte(lrfReader,
-                                            static_cast<uint8_t>(lrfSerial.read()));
+                                            lrfByte);
         if (lrfResult >= 0.0f) {
             // Valid distance — report to Jetson.
             Serial.print(F("DIST "));
             Serial.println(lrfResult, 3);
+            lrfEndMeasurement(lrfReader, lrfPower);
         } else if (lrfResult == -1.0f) {
             // Frame error (checksum failure or non-zero STA) — report failure.
             Serial.println(F("DIST -1.0"));
+            lrfEndMeasurement(lrfReader, lrfPower);
         }
         // lrfResult == -2.0f → still accumulating; do nothing.
+    }
+
+    if (lrfMeasurementTimedOut(lrfPower, millis())) {
+        Serial.println(F("DIST -1.0"));
+        lrfEndMeasurement(lrfReader, lrfPower);
     }
 
     // ── Limit switch debounce ────────────────────────────────────────────────
