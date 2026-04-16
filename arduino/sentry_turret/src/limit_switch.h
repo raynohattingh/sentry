@@ -39,6 +39,7 @@ struct LimitPin {
     LimitState state;          ///< FSM state
     unsigned long candidateMs; ///< millis() timestamp when LOW was first sampled
     bool       triggered;      ///< True when debounce window has elapsed
+    uint8_t    releaseCount;   ///< Consecutive HIGH samples counted in TRIGGERED state
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

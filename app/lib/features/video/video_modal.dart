@@ -42,6 +42,7 @@ Future<void> showVideoModal(BuildContext context, WidgetRef ref) {
               port: config.videoPort,
               username: config.videoUsername,
               password: config.videoPassword,
+              useTls: config.videoUseTls,
             ),
           ),
         ],

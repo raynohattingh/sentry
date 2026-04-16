@@ -39,6 +39,7 @@ class FSMState(str, Enum):
         TRACK: Active target at MED threat; sampled LRF.
         ACQUIRE: Active target at HIGH threat; continuous LRF, hard lock.
         SEARCH: Target lost; arc sweep around last-known position.
+        MANUAL_OVERRIDE: Operator has taken direct control via command topic.
     """
 
     SCAN = "SCAN"
@@ -61,6 +62,10 @@ class HousingProfile(str, Enum):
         try:
             return cls(value.upper())
         except ValueError:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Unknown housing profile '%s', defaulting to MVP.", value,
+            )
             return cls.MVP
 
 
@@ -109,6 +114,11 @@ class Frame:
     timestamp_utc: str
     width: int = 480
     height: int = 320
+
+    def __post_init__(self) -> None:
+        if self.data is not None and len(self.data.shape) >= 2:
+            object.__setattr__(self, "height", self.data.shape[0])
+            object.__setattr__(self, "width", self.data.shape[1])
 
 
 @dataclass
@@ -289,7 +299,7 @@ class SafetyStatus:
     protection_mode: ProtectionMode
     motion_allowed: bool
     motion_block_reason: str | None
-    validated_switches: list[str] = field(default_factory=list)
+    validated_switches: tuple[str, ...] = ()
     timestamp_utc: str = ""
 
     def to_dict(self) -> dict[str, object]:
@@ -329,12 +339,12 @@ class TelemetryRecord:
     session_id: str
     target_id: int
     threat_score: float
-    tier: str
+    tier: ThreatTier
     lat: float | None
     lon: float | None
     lrf_distance_m: float | None
     pan_angle: float
     tilt_angle: float
     timestamp_utc: str
-    velocity_vector: dict | None
-    fsm_state: str
+    velocity_vector: dict[str, float] | None
+    fsm_state: FSMState

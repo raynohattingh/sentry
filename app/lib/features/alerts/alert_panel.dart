@@ -225,7 +225,7 @@ class AlertLogEntryTile extends StatelessWidget {
                     '${ts.hour.toString().padLeft(2, '0')}:'
                     '${ts.minute.toString().padLeft(2, '0')}:'
                     '${ts.second.toString().padLeft(2, '0')} '
-                    'sess:${entry.sessionId.substring(0, 8)}',
+                    'sess:${entry.sessionId.length >= 8 ? entry.sessionId.substring(0, 8) : entry.sessionId}',
                     style: const TextStyle(
                         color: Colors.white24, fontSize: 9),
                   ),

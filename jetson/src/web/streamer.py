@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import functools
+import hmac
 import logging
 import threading
 import time
@@ -52,7 +53,8 @@ def update_stream_frame(frame) -> None:
 
 
 def _check_auth(username: str, password: str) -> bool:
-    return username == config.HUD_USERNAME and password == config.HUD_PASSWORD
+    return (hmac.compare_digest(username, config.HUD_USERNAME)
+            and hmac.compare_digest(password, config.HUD_PASSWORD))
 
 
 def _unauthorized() -> Response:
@@ -90,13 +92,31 @@ def require_auth(f: Callable) -> Callable:
 # ---------------------------------------------------------------------------
 
 
+_MAX_CONNECTIONS = 4
+_active_connections = 0
+_conn_lock = threading.Lock()
+
+
 def generate():
     """MJPEG frame generator.
 
     Yields:
         Multipart JPEG byte chunks for the HTTP response.
     """
-    global output_frame
+    global _active_connections
+    with _conn_lock:
+        if _active_connections >= _MAX_CONNECTIONS:
+            return
+        _active_connections += 1
+    try:
+        _generate_frames()
+    finally:
+        with _conn_lock:
+            _active_connections -= 1
+
+
+def _generate_frames():
+    """Inner frame generator loop."""
     while True:
         with lock:
             frame = output_frame
@@ -129,7 +149,7 @@ def generate():
 def index() -> str:
     """Serve the web HUD HTML page."""
     logger.debug("[WEB] HUD page served.")
-    return """
+    html = """
     <html>
         <head>
             <title>Sentry HUD</title>
@@ -145,6 +165,11 @@ def index() -> str:
         </body>
     </html>
     """
+    resp = Response(html, mimetype="text/html")
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self'"
+    return resp
 
 
 @app.route("/video_feed")
@@ -160,14 +185,26 @@ def video_feed() -> Response:
 # ---------------------------------------------------------------------------
 
 
-def start_web_server(host: str = "0.0.0.0", port: int = 5000) -> None:
-    """Start the Flask web server (blocking).
+def start_web_server(host: str | None = None, port: int = 5000) -> None:
+    """Start the web server (blocking).
 
     Intended to be run in a daemon thread from main.py.
 
     Args:
-        host: Bind address.
+        host: Bind address. Defaults to ``config.HUD_BIND_ADDRESS``.
         port: TCP port.
     """
+    host = host or config.HUD_BIND_ADDRESS
+    if config.HUD_PASSWORD == "changeme":
+        logger.critical(
+            "[HUD] Default password 'changeme' in use — "
+            "set HUD_PASSWORD env var before deployment!"
+        )
     logger.info("[WEB] Stream available at http://%s:%d", host, port)
-    app.run(host=host, port=port, debug=False, use_reloader=False)
+    try:
+        import waitress  # type: ignore[import]
+        logger.info("[WEB] Using waitress production server.")
+        waitress.serve(app, host=host, port=port)
+    except ImportError:
+        logger.warning("[WEB] waitress not installed — using Flask dev server.")
+        app.run(host=host, port=port, debug=False, use_reloader=False)

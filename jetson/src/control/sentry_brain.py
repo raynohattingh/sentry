@@ -46,6 +46,7 @@ _STATE_ORDER: dict[FSMState, int] = {
     FSMState.SEARCH: 1,
     FSMState.TRACK: 2,
     FSMState.ACQUIRE: 3,
+    FSMState.MANUAL_OVERRIDE: 5,
 }
 
 # Dwell timer lookup (ms) keyed by FSMState.
@@ -93,7 +94,7 @@ class SentryBrain:
 
         self._scan_direction: float = 1.0  # +1 = moving right, -1 = left
         self._last_known_pan: int = 0      # SEARCH arc anchor
-        self._search_entered_s: float = 0.0
+        self._search_entered_s: float = time.monotonic()
         self._approaching_limit: bool = False
         self._in_taper_zone: bool = False
 
@@ -130,6 +131,8 @@ class SentryBrain:
         self,
         assessments: list[ThreatAssessment],
         position: TurretPosition,
+        target_centroid: tuple[float, float] | None = None,
+        frame_center: tuple[float, float] | None = None,
     ) -> TurretCommand:
         """Run one FSM + PID iteration and return the turret command.
 
@@ -137,6 +140,8 @@ class SentryBrain:
             assessments: Threat assessments for all currently tracked targets.
                 Empty list means no targets visible.
             position: Latest known turret position from the Arduino.
+            target_centroid: (x, y) pixel centroid of the best target, or None.
+            frame_center: (x, y) pixel centre of the camera frame, or None.
 
         Returns:
             TurretCommand with pan/tilt velocities and LRF flag.
@@ -145,10 +150,12 @@ class SentryBrain:
         with self._override_lock:
             if self._override:
                 return TurretCommand(pan_velocity=0.0, tilt_velocity=0.0, fire_lrf=False,
-                                     timestamp_utc=datetime.datetime.utcnow().isoformat() + "Z")
+                                     timestamp_utc=datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"))
         self._update_state(assessments, position)
 
-        pan_v, tilt_v, fire_lrf = self._compute_velocities(assessments, position)
+        pan_v, tilt_v, fire_lrf = self._compute_velocities(
+            assessments, position, target_centroid, frame_center,
+        )
 
         # Apply limit tapering.
         pan_v = self.taper_velocity(
@@ -173,7 +180,7 @@ class SentryBrain:
         self._in_taper_zone = new_in_zone
         self._approaching_limit = new_in_zone
 
-        now = datetime.datetime.utcnow().isoformat() + "Z"
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
         return TurretCommand(
             pan_velocity=pan_v,
             tilt_velocity=tilt_v,
@@ -224,7 +231,9 @@ class SentryBrain:
                     if self._dwell_elapsed():
                         self._transition(FSMState.SCAN)
                 elif self._state == FSMState.SEARCH:
-                    self._transition(FSMState.SCAN)
+                    # B21: LOW-tier target visible while searching — stay in
+                    # SEARCH so we don't abandon the search arc prematurely.
+                    pass
 
     def _transition(self, new_state: FSMState) -> None:
         """Transition to a new FSM state and record entry time.
@@ -260,12 +269,16 @@ class SentryBrain:
         self,
         assessments: list[ThreatAssessment],
         position: TurretPosition,
+        target_centroid: tuple[float, float] | None = None,
+        frame_center: tuple[float, float] | None = None,
     ) -> tuple[float, float, bool]:
         """Compute raw (pre-taper) pan/tilt velocities and LRF flag.
 
         Args:
             assessments: Current threat assessments.
             position: Current turret position.
+            target_centroid: (x, y) pixel centroid of the best target, or None.
+            frame_center: (x, y) pixel centre of the camera frame, or None.
 
         Returns:
             Tuple of (pan_velocity, tilt_velocity, fire_lrf).
@@ -273,9 +286,13 @@ class SentryBrain:
         fire_lrf = False
 
         if self._state == FSMState.SCAN:
+            self._pan_pid.reset()
+            self._tilt_pid.reset()
             return self._scan_sweep(position), 0.0, False
 
         if self._state == FSMState.SEARCH:
+            self._pan_pid.reset()
+            self._tilt_pid.reset()
             return self._search_arc(position), 0.0, False
 
         if self._state in (FSMState.TRACK, FSMState.ACQUIRE):
@@ -283,10 +300,19 @@ class SentryBrain:
                 return 0.0, 0.0, False
             best = max(assessments, key=lambda a: a.threat_score)
             fire_lrf = best.lrf_required
-            # PID is driven by the caller in the original design, but the brain
-            # owns it here.  We return 0,0 when no centroid is available;
-            # main.py provides centroid-based error to the brain via position.
-            # For now: return fixed tracking values (main.py will compute error).
+
+            if target_centroid is not None and frame_center is not None:
+                err_x = target_centroid[0] - frame_center[0]
+                err_y = target_centroid[1] - frame_center[1]
+                if abs(err_x) < config.DEAD_ZONE:
+                    err_x = 0
+                if abs(err_y) < config.DEAD_ZONE:
+                    err_y = 0
+                v_pan = self._pan_pid.update(float(err_x))
+                v_tilt = self._tilt_pid.update(float(err_y))
+                return v_pan, v_tilt, fire_lrf
+
+            logger.warning("[BRAIN] TRACK/ACQUIRE state but no target centroid provided.")
             return 0.0, 0.0, fire_lrf
 
         return 0.0, 0.0, False
@@ -301,9 +327,10 @@ class SentryBrain:
             Pan velocity in steps/sec.
         """
         pan = position.pan_steps
-        if pan >= config.SCAN_PAN_MAX:
+        # 1-step hysteresis to prevent oscillation at exact boundary.
+        if pan >= config.SCAN_PAN_MAX + 1:
             self._scan_direction = -1.0
-        elif pan <= config.SCAN_PAN_MIN:
+        elif pan <= config.SCAN_PAN_MIN - 1:
             self._scan_direction = 1.0
         return config.SCAN_VELOCITY * self._scan_direction
 
@@ -359,6 +386,11 @@ class SentryBrain:
             return velocity
         if abs_pos >= hard:
             return 0.0
+        # Only taper when velocity is directed toward the limit.
+        # If the turret is moving back toward centre, let it pass untapered.
+        moving_toward_limit = (pos > 0 and velocity > 0) or (pos < 0 and velocity < 0)
+        if not moving_toward_limit:
+            return velocity
         taper_width = hard - warn
         if taper_width <= 0:
             return 0.0

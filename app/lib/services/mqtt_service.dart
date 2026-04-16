@@ -131,6 +131,12 @@ class MqttServiceImpl implements MqttService {
       final raw = utf8.decode(payload.toList());
       try {
         final json = jsonDecode(raw) as Map<String, dynamic>;
+        // Skip messages from other sentry devices
+        if (_config != null &&
+            json['sentry_id'] != null &&
+            json['sentry_id'] != _config!.sentryId) {
+          continue;
+        }
         if (msg.topic == mqttStatusTopic) {
           final status = SafetyStatusRecord.fromJson(json);
           _safetyStatusController.add(status);

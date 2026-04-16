@@ -26,19 +26,31 @@ class _OverrideScreenState extends ConsumerState<OverrideScreen> {
   ManualCommand? _currentCommand;
   Timer? _publishTimer;
   MqttService? _mqtt;
+  DateTime _lastTouchTime = DateTime.now();
+
+  // Cached references for safe use in dispose() (C6)
+  MqttService? _cachedMqtt;
+  String _cachedSentryId = '';
 
   @override
   void initState() {
     super.initState();
     try {
       _mqtt = ref.read(mqttServiceProvider);
+      _cachedMqtt = _mqtt;
     } catch (_) {
       // mqttServiceProvider not overridden — OK in test/dev
+    }
+    try {
+      _cachedSentryId = ref.read(sentryConfigProvider).sentryId;
+    } catch (_) {
+      // sentryConfigProvider not overridden — OK in test/dev
     }
   }
 
   void _onCommandChanged(ManualCommand command) {
     _currentCommand = command;
+    _lastTouchTime = DateTime.now();
     _publishTimer ??= Timer.periodic(
       Duration(milliseconds: kJoystickPublishIntervalMs),
       (_) => _publish(),
@@ -55,6 +67,15 @@ class _OverrideScreenState extends ConsumerState<OverrideScreen> {
   }
 
   void _publish() {
+    // Dead-man's switch: auto-stop if no touch input for >2 seconds
+    if (DateTime.now().difference(_lastTouchTime) > const Duration(seconds: 2)) {
+      final stop = ManualCommand.zero(_cachedSentryId);
+      _mqtt?.publishCommand(stop);
+      _publishTimer?.cancel();
+      _publishTimer = null;
+      _currentCommand = null;
+      return;
+    }
     final cmd = _currentCommand;
     if (cmd == null) return;
     _mqtt?.publishCommand(cmd);
@@ -63,9 +84,8 @@ class _OverrideScreenState extends ConsumerState<OverrideScreen> {
   @override
   void dispose() {
     _publishTimer?.cancel();
-    // Publish zero-velocity stop on exit
-    final config = ref.read(sentryConfigProvider);
-    _mqtt?.publishCommand(ManualCommand.zero(config.sentryId));
+    // Publish zero-velocity stop on exit using cached references (C6)
+    _cachedMqtt?.publishCommand(ManualCommand.zero(_cachedSentryId));
     super.dispose();
   }
 

@@ -18,7 +18,6 @@ import datetime
 import logging
 import threading
 import time
-from typing import Union
 
 import config
 from comms.serial_io import SerialPort, SerialProtocol, parse_frame
@@ -48,16 +47,17 @@ class ArduinoLink:
                 When None, a real ``SerialPort`` is created.
         """
         self._serial: SerialProtocol = serial_port or SerialPort()
-        self._lock: threading.Lock = threading.Lock()
+        self._lock: threading.RLock = threading.RLock()
         self._position: TurretPosition = TurretPosition(
             pan_steps=0,
             tilt_steps=0,
-            received_utc=datetime.datetime.utcnow().isoformat() + "Z",
+            received_utc=datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
         )
         self._lrf_reading: LRFReading | None = None
         self._last_limit_event: LimitEvent | None = None
         self._validated_switches: set[str] = set()
         self._last_pos_received_ns: int = 0
+        self._started_ns: int = time.monotonic_ns()
         self._read_thread: threading.Thread | None = None
         self._running: bool = False
 
@@ -110,7 +110,7 @@ class ArduinoLink:
 
     def _handle_parsed_frame(
         self,
-        parsed: Union[LRFReading, LimitEvent, TurretPosition, None],
+        parsed: LRFReading | LimitEvent | TurretPosition | None,
     ) -> None:
         if isinstance(parsed, TurretPosition):
             with self._lock:
@@ -167,10 +167,11 @@ class ArduinoLink:
         if not self._serial.is_connected:
             return
         val = 1 if state else 0
-        try:
-            self._serial.write(f"E {val}\n".encode())
-        except Exception:
-            pass
+        with self._lock:
+            try:
+                self._serial.write(f"E {val}\n".encode())
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Reconnect logic
@@ -196,7 +197,7 @@ class ArduinoLink:
                 self._serial.open(config.SERIAL_PORT, config.BAUD_RATE)
                 with self._lock:
                     self._position = TurretPosition(
-                        0, 0, datetime.datetime.utcnow().isoformat() + "Z"
+                        0, 0, datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
                     )
                 logger.info("[SERIAL] Reconnected.")
             except Exception as exc:
@@ -214,7 +215,7 @@ class ArduinoLink:
             ``config.SERIAL_HEARTBEAT_TIMEOUT_S``.
         """
         if self._last_pos_received_ns == 0:
-            return True  # no POS expected yet (e.g. startup)
+            return (time.monotonic_ns() - self._started_ns) < 10_000_000_000
         elapsed_s = (time.monotonic_ns() - self._last_pos_received_ns) / 1e9
         return elapsed_s < config.SERIAL_HEARTBEAT_TIMEOUT_S
 

@@ -126,7 +126,7 @@ class ThreatScorer:
         Returns:
             1.0 during night hours, 0.5 otherwise.
         """
-        hour = datetime.datetime.utcnow().hour
+        hour = (datetime.datetime.now(datetime.timezone.utc).hour + config.TIMEZONE_OFFSET_H) % 24
         start = config.NIGHT_START_HOUR
         end = config.NIGHT_END_HOUR
         if start > end:

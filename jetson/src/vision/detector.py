@@ -71,12 +71,16 @@ class ObjectDetector:
             confidence threshold and matches the target class ID.  Returns an
             empty list when no targets are found.
         """
-        results = self.model.predict(
-            frame,
-            conf=config.CONF_THRESHOLD,
-            classes=[config.TARGET_CLASS_ID],
-            verbose=False,
-        )
+        try:
+            results = self.model.predict(
+                frame,
+                conf=config.CONF_THRESHOLD,
+                classes=[config.TARGET_CLASS_ID],
+                verbose=False,
+            )
+        except Exception:
+            logger.exception("[DETECTOR] Inference failed")
+            return []
 
         detections: list[Detection] = []
         for r in results:

@@ -14,6 +14,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
 
 import config
@@ -89,7 +90,7 @@ class CentroidTracker:
         self._prev_centroids[tid] = detection.centroid
         self._bboxes[tid] = detection.bbox
         self._areas[tid] = detection.area
-        self._last_seen[tid] = datetime.datetime.utcnow().isoformat() + "Z"
+        self._last_seen[tid] = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
         return tid
 
     def _deregister(self, tid: int) -> None:
@@ -140,27 +141,22 @@ class CentroidTracker:
         # Distance matrix: shape (n_existing, n_detections)
         dist_matrix = cdist(existing_centroids, input_centroids)
 
-        # Sort rows by minimum value, then columns by minimum value.
-        rows = dist_matrix.min(axis=1).argsort()
-        cols = dist_matrix.argmin(axis=1)[rows]
+        # Optimal matching via the Hungarian algorithm.
+        row_indices, col_indices = linear_sum_assignment(dist_matrix)
 
         used_rows: set[int] = set()
         used_cols: set[int] = set()
 
-        for row, col in zip(rows, cols):
-            if row in used_rows or col in used_cols:
-                continue
+        for row, col in zip(row_indices, col_indices):
             if dist_matrix[row, col] > self.max_distance:
                 continue
 
             tid = existing_ids[row]
             det = detections[col]
-            now = datetime.datetime.utcnow().isoformat() + "Z"
+            now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
-            # Update velocity using centroid delta.
-            prev = self._prev_centroids.get(tid, self._centroids[tid])
+            # Save previous centroid BEFORE updating current.
             self._prev_centroids[tid] = self._centroids[tid]
-
             self._centroids[tid] = det.centroid
             self._disappeared[tid] = 0
             self._bboxes[tid] = det.bbox
@@ -206,7 +202,7 @@ class CentroidTracker:
                     disappeared_frames=self._disappeared[tid],
                     area=self._areas.get(tid, 0),
                     last_seen_utc=self._last_seen.get(
-                        tid, datetime.datetime.utcnow().isoformat() + "Z"
+                        tid, datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
                     ),
                 )
             )

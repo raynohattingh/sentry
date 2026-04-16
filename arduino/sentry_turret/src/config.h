@@ -75,6 +75,12 @@ static constexpr float VELOCITY_SCALE_FACTOR = 1000.0f;
  *  Units: microseconds. Valid range: 100–10000. Default: 200 (= 5000 steps/sec). */
 static constexpr uint16_t MIN_STEP_INTERVAL_US = 200;
 
+/** @brief Maximum step interval — anything slower is treated as stopped.
+ *  Prevents near-zero velocities from producing extremely long (multi-second)
+ *  inter-step delays that could appear as a locked-up axis.
+ *  Units: microseconds. Default: 1000000 (1 second). */
+static constexpr uint32_t MAX_STEP_INTERVAL_US = 1000000;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Limit Switches (Normally-Open, active-LOW via INPUT_PULLUP)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +107,12 @@ static constexpr uint8_t LIMIT_TILT_UP_PIN = 12;
  *  before a limit trigger is confirmed (FR-008).
  *  Units: milliseconds. Valid range: 1–50. Default: 5. */
 static constexpr uint8_t LIMIT_DEBOUNCE_MS = 5;
+
+/** @brief Number of consecutive HIGH samples required before a triggered
+ *  limit switch transitions back to IDLE.  Prevents a single spurious
+ *  HIGH sample (e.g. from vibration) from prematurely releasing the gate.
+ *  Units: samples (loop iterations). Valid range: 1–10. Default: 3. */
+static constexpr uint8_t LIMIT_RELEASE_DEBOUNCE_COUNT = 3;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Laser Range Finder (LRF) — SoftwareSerial on A0/A1 (D14/D15)
@@ -158,7 +170,7 @@ static constexpr uint8_t LRF_TRIGGER[LRF_FRAME_LEN] = {
 /** @brief Maximum time to wait for a complete 8-byte LRF reply frame (FR-021).
  *  On timeout the firmware emits DIST -1.0\n and resumes normal operation.
  *  Units: milliseconds. Valid range: 50–500. Default: 100. */
-static constexpr uint8_t LRF_READ_TIMEOUT_MS = 100;
+static constexpr uint16_t LRF_READ_TIMEOUT_MS = 100;
 
 /** @brief Maximum time to wait for the LRF boot self-test frame in setup() (FR-028).
  *  Some module revisions do not emit a boot frame on success; timeout is non-fatal.

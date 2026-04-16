@@ -5,13 +5,9 @@
  * See stepper.h for full API documentation and design constraints.
  *
  * Step pulse strategy:
- *   Two consecutive digitalWrite() calls generate the STEP HIGH → LOW pulse.
- *   AVR GPIO toggle latency is ~125 ns per instruction (16 MHz clock), giving
- *   an estimated HIGH duration of ~125–250 ns per write pair, which is below
- *   the A4988/DRV8825 datasheet minimum of 1 µs.  In practice the AVR compiler
- *   inserts additional instruction latency (register loads, branch overhead)
- *   that brings the actual high time to ≥1 µs without an explicit delay.
- *   No delayMicroseconds() is inserted here (FR-026).
+ *   A delayMicroseconds(2) is inserted between the STEP HIGH and LOW writes
+ *   to guarantee the A4988/DRV8825 datasheet minimum of 1 µs STEP pulse width
+ *   regardless of compiler optimisation level or clock speed.
  */
 
 #ifndef NATIVE_ENV
@@ -56,10 +52,16 @@ void stepperSetVelocity(StepperAxis& axis, float velocity) {
     digitalWrite(axis.dirPin, velocity > 0.0f ? HIGH : LOW);
 
     // Compute interval from magnitude; apply minimum clamp (FR-014).
-    unsigned long interval =
-        static_cast<unsigned long>(VELOCITY_SCALE_FACTOR / fabsf(velocity));
+    uint32_t interval =
+        static_cast<uint32_t>(VELOCITY_SCALE_FACTOR / fabsf(velocity));
     if (interval < MIN_STEP_INTERVAL_US) {
         interval = MIN_STEP_INTERVAL_US;
+    }
+    // Upper clamp: anything slower than MAX_STEP_INTERVAL_US is effectively
+    // stopped — treat as zero velocity to avoid multi-second dead time.
+    if (interval > MAX_STEP_INTERVAL_US) {
+        axis.stepIntervalUs = 0;
+        return;
     }
     axis.stepIntervalUs = interval;
 
@@ -70,14 +72,21 @@ void stepperTick(StepperAxis& axis) {
     // Stopped or uninitialised — nothing to do.
     if (axis.stepIntervalUs == 0) return;
 
-    const unsigned long now = micros();
-    if (now < axis.nextStepTimeUs) return;
+    const uint32_t now = micros();
+    // Unsigned subtraction handles micros() wrap-around at ~70 min correctly.
+    if ((now - axis.nextStepTimeUs) < axis.stepIntervalUs) return;
 
-    // Schedule next step before emitting pulse to maintain cadence.
-    axis.nextStepTimeUs = now + axis.stepIntervalUs;
+    // Advance nextStepTimeUs by one interval to prevent timing drift.
+    axis.nextStepTimeUs += axis.stepIntervalUs;
+    // Catch-up guard: if we fell behind by more than 2 intervals, reset to now
+    // to avoid a burst of rapid-fire steps.
+    if ((now - axis.nextStepTimeUs) > axis.stepIntervalUs * 2) {
+        axis.nextStepTimeUs = now + axis.stepIntervalUs;
+    }
 
-    // Emit STEP pulse: two back-to-back writes — no delayMicroseconds (FR-026).
+    // Emit STEP pulse with guaranteed minimum 1 µs HIGH duration.
     digitalWrite(axis.stepPin, HIGH);
+    delayMicroseconds(2);
     digitalWrite(axis.stepPin, LOW);
 
     // Update signed step count with INT32 overflow guard (FR-022).

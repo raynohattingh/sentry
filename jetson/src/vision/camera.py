@@ -61,6 +61,7 @@ class ThreadedCamera:
         self._running: bool = False
         self._lock: threading.Lock = threading.Lock()
         self._cap: cv2.VideoCapture | None = None
+        self._thread: threading.Thread | None = None
         self._fault_count: int = 0
 
         self._open_capture()
@@ -88,9 +89,12 @@ class ThreadedCamera:
 
         logger.info("[CAMERA] Opening V4L2 device index %d.", config.CAMERA_INDEX)
         cap = cv2.VideoCapture(config.CAMERA_INDEX, cv2.CAP_V4L2)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"YUYV"))
+        if not cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH):
+            logger.warning("[CAMERA] Failed to set frame width to %d.", config.CAMERA_WIDTH)
+        if not cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT):
+            logger.warning("[CAMERA] Failed to set frame height to %d.", config.CAMERA_HEIGHT)
+        if not cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"YUYV")):
+            logger.warning("[CAMERA] Failed to set FOURCC to YUYV.")
 
         if not cap.isOpened():
             logger.error(
@@ -115,8 +119,8 @@ class ThreadedCamera:
             self — allows fluent chaining: ``cam = ThreadedCamera().start()``.
         """
         self._running = True
-        t = threading.Thread(target=self._update, daemon=True)
-        t.start()
+        self._thread = threading.Thread(target=self._update, daemon=True)
+        self._thread.start()
         logger.info("[CAMERA] Capture thread started.")
         return self
 
@@ -124,13 +128,13 @@ class ThreadedCamera:
         """Background thread: read frames continuously until stopped."""
         while self._running:
             if self._cap is None or not self._cap.isOpened():
-                time.sleep(config.SERIAL_RETRY_INTERVAL_S)
+                time.sleep(config.CAMERA_RETRY_INTERVAL_S)
                 continue
 
             ret, raw = self._cap.read()
             if ret and raw is not None:
                 self._fault_count = 0
-                now = datetime.datetime.utcnow().isoformat() + "Z"
+                now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
                 frame = Frame(data=raw, timestamp_utc=now,
                               width=config.CAMERA_WIDTH, height=config.CAMERA_HEIGHT)
                 with self._lock:
@@ -139,10 +143,10 @@ class ThreadedCamera:
                 self._fault_count += 1
                 if self._fault_count >= config.CAMERA_FAULT_THRESHOLD:
                     logger.warning("[CAMERA] Disconnected — retrying in %.1fs…",
-                                   config.SERIAL_RETRY_INTERVAL_S)
+                                   config.CAMERA_RETRY_INTERVAL_S)
                     if self._cap:
                         self._cap.release()
-                    time.sleep(config.SERIAL_RETRY_INTERVAL_S)
+                    time.sleep(config.CAMERA_RETRY_INTERVAL_S)
                     try:
                         self._open_capture()
                         self._fault_count = 0
@@ -171,6 +175,8 @@ class ThreadedCamera:
     def stop(self) -> None:
         """Stop the capture thread and release the camera device."""
         self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
         if self._cap:
             self._cap.release()
         logger.info("[CAMERA] Stopped.")

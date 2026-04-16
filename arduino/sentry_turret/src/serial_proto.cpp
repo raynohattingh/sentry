@@ -10,6 +10,7 @@
 
 #include <string.h>
 #include <stdlib.h>   // strtof
+#include <math.h>     // isnan, isinf
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
@@ -37,6 +38,14 @@ static int8_t parseLine(SerialProtoState& s) {
 
         float tilt = strtof(endPtr1, &endPtr2);
         if (endPtr2 == endPtr1) return CMD_UNKNOWN;
+
+        // Reject non-finite values — NaN/Inf from malformed input could
+        // propagate into stepper math and cause unsafe behaviour (SC-NaN).
+        if (isnan(pan) || isinf(pan) || isnan(tilt) || isinf(tilt)) {
+            s.panSpeed  = 0.0f;
+            s.tiltSpeed = 0.0f;
+            return CMD_VELOCITY;
+        }
 
         s.panSpeed  = pan;
         s.tiltSpeed = tilt;

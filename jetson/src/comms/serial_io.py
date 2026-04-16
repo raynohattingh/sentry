@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Pre-compiled regex for valid serial frames.
 _FRAME_RE = re.compile(
-    r"^(DIST \d+(\.\d+)?|POS -?\d+ -?\d+|LIMIT (PAN|TILT) (LEFT|RIGHT|UP|DOWN))$"
+    r"^(DIST \d+(\.\d+)?|POS -?\d+ -?\d+|LIMIT PAN (LEFT|RIGHT)|LIMIT TILT (UP|DOWN))$"
 )
 
 
@@ -44,7 +44,7 @@ def parse_frame(line: str) -> LRFReading | LimitEvent | TurretPosition | None:
         command but is malformed.
     """
     line = line.strip()
-    now = datetime.datetime.utcnow().isoformat() + "Z"
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
     if not line:
         return None
@@ -158,14 +158,20 @@ class SerialPort:
         self._connected = True
         logger.info("[SERIAL] Opened %s @ %d baud.", port, baud)
 
-    def write(self, data: bytes) -> None:
+    def write(self, data: bytes) -> bool:
         """Write raw bytes to the serial port.
 
         Args:
             data: Bytes to transmit.
+
+        Returns:
+            True if the data was written, False if the port is not open.
         """
-        if self._serial:
-            self._serial.write(data)
+        if self._serial is None:
+            logger.warning("[SERIAL] Write called but port is not open.")
+            return False
+        self._serial.write(data)
+        return True
 
     def read_line(self) -> str | None:
         """Read one line from the serial port.

@@ -32,7 +32,7 @@ from sentry_types import (
 logger = logging.getLogger(__name__)
 
 
-def _convert_velocity(v_px_frame: float, lrf_m: float) -> float:
+def _convert_velocity(v_px_frame: float, lrf_m: float) -> float | None:
     """Convert pixel-per-frame velocity to metres per second.
 
     Uses the pinhole camera model:
@@ -44,12 +44,16 @@ def _convert_velocity(v_px_frame: float, lrf_m: float) -> float:
         lrf_m: Laser range-finder distance to target in metres.
 
     Returns:
-        Velocity component in metres per second.
+        Velocity component in metres per second, or None if the result
+        is not finite (e.g. NaN or infinity).
     """
     focal_px = (config.CAMERA_WIDTH / 2.0) / math.tan(
         math.radians(config.CAMERA_HFOV_DEG / 2.0)
     )
-    return (v_px_frame * lrf_m) / (focal_px * config.CAMERA_FPS)
+    result = (v_px_frame * lrf_m) / (focal_px * config.CAMERA_FPS)
+    if not math.isfinite(result):
+        return None
+    return result
 
 
 class TelemetryRecorder:
@@ -119,7 +123,7 @@ class TelemetryRecorder:
         Returns:
             A fully populated TelemetryRecord with nullable GPS fields.
         """
-        now = datetime.datetime.utcnow().isoformat() + "Z"
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
         # Compute pan/tilt angles.
         pan_angle = position.pan_steps / config.STEPS_PER_DEGREE
@@ -131,7 +135,7 @@ class TelemetryRecorder:
         lrf_distance: float | None = None
         velocity_vector: dict | None = None
 
-        if config.LRF_ENABLED and lrf_reading and lrf_reading.valid and lrf_reading.distance_m:
+        if config.LRF_ENABLED and lrf_reading and lrf_reading.valid and lrf_reading.distance_m is not None:
             lrf_distance = lrf_reading.distance_m
             azimuth, _ = pan_tilt_to_azimuth(
                 position.pan_steps, position.tilt_steps, config.SENTRY_HEADING_DEG
@@ -166,7 +170,11 @@ class TelemetryRecorder:
         Args:
             record: The TelemetryRecord to emit.
         """
-        payload = json.dumps(dataclasses.asdict(record))
+        try:
+            payload = json.dumps(dataclasses.asdict(record))
+        except ValueError as exc:
+            logger.error("[TELEMETRY] JSON serialization failed (nan/inf?): %s", exc)
+            return
         self._jsonl_logger.info(payload)
         try:
             self._mqtt.publish_async(payload)

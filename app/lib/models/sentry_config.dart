@@ -10,6 +10,7 @@ class SentryConfig {
     this.videoPort = 5000,
     this.videoUsername = '',
     this.videoPassword = '',
+    this.videoUseTls = true,
     this.sentryLat,
     this.sentryLon,
     this.northOffsetDegrees = 0.0,
@@ -25,6 +26,7 @@ class SentryConfig {
   final int videoPort;
   final String videoUsername;
   final String videoPassword;
+  final bool videoUseTls;
   final double? sentryLat;
   final double? sentryLon;
   final double northOffsetDegrees;
@@ -33,6 +35,9 @@ class SentryConfig {
   /// Returns true only when all required connection fields are filled.
   bool get isConfigured =>
       brokerHost.isNotEmpty && mqttUsername.isNotEmpty && sentryId.isNotEmpty;
+
+  /// Sentinel used to distinguish "not passed" from "explicitly set to null".
+  static const _unset = Object();
 
   SentryConfig copyWith({
     String? brokerHost,
@@ -44,8 +49,9 @@ class SentryConfig {
     int? videoPort,
     String? videoUsername,
     String? videoPassword,
-    double? sentryLat,
-    double? sentryLon,
+    bool? videoUseTls,
+    Object? sentryLat = _unset,
+    Object? sentryLon = _unset,
     double? northOffsetDegrees,
     int? retentionDays,
   }) {
@@ -59,8 +65,9 @@ class SentryConfig {
       videoPort: videoPort ?? this.videoPort,
       videoUsername: videoUsername ?? this.videoUsername,
       videoPassword: videoPassword ?? this.videoPassword,
-      sentryLat: sentryLat ?? this.sentryLat,
-      sentryLon: sentryLon ?? this.sentryLon,
+      videoUseTls: videoUseTls ?? this.videoUseTls,
+      sentryLat: sentryLat == _unset ? this.sentryLat : sentryLat as double?,
+      sentryLon: sentryLon == _unset ? this.sentryLon : sentryLon as double?,
       northOffsetDegrees: northOffsetDegrees ?? this.northOffsetDegrees,
       retentionDays: retentionDays ?? this.retentionDays,
     );
@@ -74,6 +81,7 @@ class SentryConfig {
         'videoHost': videoHost,
         'videoPort': videoPort,
         'videoUsername': videoUsername,
+        'videoUseTls': videoUseTls,
         'sentryLat': sentryLat,
         'sentryLon': sentryLon,
         'northOffsetDegrees': northOffsetDegrees,
@@ -90,6 +98,7 @@ class SentryConfig {
       videoHost: json['videoHost'] as String? ?? '',
       videoPort: json['videoPort'] as int? ?? 5000,
       videoUsername: json['videoUsername'] as String? ?? '',
+      videoUseTls: json['videoUseTls'] as bool? ?? true,
       sentryLat: json['sentryLat'] as double?,
       sentryLon: json['sentryLon'] as double?,
       northOffsetDegrees: json['northOffsetDegrees'] as double? ?? 0.0,

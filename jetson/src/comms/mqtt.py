@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import queue
 import ssl
 import threading
@@ -122,14 +123,28 @@ class MQTTPublisher:
             time.sleep(60)
             return
 
-        client = mqtt.Client()
+        # Clean up previous client if reconnecting.
+        if self._client is not None:
+            try:
+                self._client.loop_stop()
+                self._client.disconnect()
+            except Exception:
+                pass
+
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         client.on_connect = self._on_connect
         client.on_disconnect = self._on_disconnect
         if config.MQTT_USERNAME:
             client.username_pw_set(config.MQTT_USERNAME, config.MQTT_PASSWORD)
-        client.tls_set(ca_certs=None, cert_reqs=ssl.CERT_NONE,
-                       tls_version=ssl.PROTOCOL_TLS_CLIENT)
-        client.tls_insecure_set(True)
+        if config.MQTT_TLS_VERIFY:
+            client.tls_set(ca_certs=config.MQTT_CA_CERT,
+                           cert_reqs=ssl.CERT_REQUIRED,
+                           tls_version=ssl.PROTOCOL_TLS_CLIENT)
+        else:
+            logger.warning("[MQTT] TLS verification DISABLED — vulnerable to MITM.")
+            client.tls_set(ca_certs=None, cert_reqs=ssl.CERT_NONE,
+                           tls_version=ssl.PROTOCOL_TLS_CLIENT)
+            client.tls_insecure_set(True)
         client.connect(self.broker, self.port, keepalive=60)
         client.loop_start()
         self._client = client
@@ -144,12 +159,13 @@ class MQTTPublisher:
                 if self._connected and self._client:
                     self._client.publish(self.topic, payload)
                 else:
-                    # Re-queue if not connected (will be retried on reconnect).
+                    # Not connected — wait before retrying (avoid busy-loop).
+                    time.sleep(5.0)
+                    # Re-queue for next attempt.
                     try:
                         self._queue.put_nowait(payload)
                     except queue.Full:
                         pass
-                    time.sleep(0.5)
             except queue.Empty:
                 continue
             except Exception as exc:
@@ -229,14 +245,20 @@ class CommandSubscriber:
             logger.error("[CMD] paho-mqtt not installed — CommandSubscriber disabled.")
             return
 
-        client = mqtt.Client()
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         client.on_connect = self._on_connect
         client.on_message = self._on_message
         if config.MQTT_USERNAME:
             client.username_pw_set(config.MQTT_USERNAME, config.MQTT_PASSWORD)
-        client.tls_set(ca_certs=None, cert_reqs=ssl.CERT_NONE,
-                       tls_version=ssl.PROTOCOL_TLS_CLIENT)
-        client.tls_insecure_set(True)
+        if config.MQTT_TLS_VERIFY:
+            client.tls_set(ca_certs=config.MQTT_CA_CERT,
+                           cert_reqs=ssl.CERT_REQUIRED,
+                           tls_version=ssl.PROTOCOL_TLS_CLIENT)
+        else:
+            logger.warning("[CMD] TLS verification DISABLED — vulnerable to MITM.")
+            client.tls_set(ca_certs=None, cert_reqs=ssl.CERT_NONE,
+                           tls_version=ssl.PROTOCOL_TLS_CLIENT)
+            client.tls_insecure_set(True)
         client.connect(self.broker, self.port, keepalive=60)
         self._client = client
         self._running = True
@@ -279,8 +301,18 @@ class CommandSubscriber:
             logger.warning("[CMD] Non-numeric velocities — dropping command.")
             return
 
+        pan_v = float(pan_v)
+        tilt_v = float(tilt_v)
+
+        if not (math.isfinite(pan_v) and math.isfinite(tilt_v)):
+            logger.warning("[CMD] Non-finite velocity rejected (nan/inf).")
+            return
+
+        pan_v = max(-config.PAN_MAX, min(config.PAN_MAX, pan_v))
+        tilt_v = max(-config.TILT_MAX, min(config.TILT_MAX, tilt_v))
+
         self._enter_override()
-        self._set_velocity(float(pan_v), float(tilt_v))
+        self._set_velocity(pan_v, tilt_v)
 
     def _watchdog(self) -> None:
         """Stop the turret if no command arrives within the safety timeout."""

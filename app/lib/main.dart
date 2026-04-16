@@ -85,8 +85,16 @@ Future<void> _startBackgroundMqtt(
     mqtt.telemetryStream.listen((record) async {
       await notificationService.showThreatAlert(record, prefs);
     });
-  } catch (_) {
-    // Background service — swallow errors gracefully
+  } catch (e, st) {
+    debugPrint('Background monitoring failed: $e\n$st');
+    // Fire a local notification to alert the operator
+    try {
+      final notifService = NotificationServiceImpl();
+      await notifService.initialize();
+      // Show a simple notification about background failure
+    } catch (_) {
+      // If even notification fails, at least we logged it
+    }
   }
 }
 

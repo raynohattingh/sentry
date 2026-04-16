@@ -92,6 +92,7 @@ void lrfBeginMeasurement(Stream& serial,
     control.measurementActive = true;
     control.measurementStartMs = nowMs;
     applyPowerState(control, true);
+    delay(1);  // 1 ms settling time after power-on before issuing trigger.
     lrfTrigger(serial);
 }
 

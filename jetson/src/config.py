@@ -44,6 +44,7 @@ GST_PIPELINE: str = (
 CAMERA_FAULT_THRESHOLD: int = 5  # Consecutive failed frames before fault declared
 CAMERA_FPS: int = int(os.environ.get("CAMERA_FPS", "25"))
 CAMERA_HFOV_DEG: float = float(os.environ.get("CAMERA_HFOV_DEG", "120.0"))
+CAMERA_RETRY_INTERVAL_S: float = 3.0
 
 # ---------------------------------------------------------------------------
 # AI / Inference
@@ -72,6 +73,10 @@ W_MOTION: float = 0.3
 W_GROUPING: float = 0.2
 W_TIME_OF_DAY: float = 0.1
 
+_weight_sum = W_DISTANCE + W_MOTION + W_GROUPING + W_TIME_OF_DAY
+if abs(_weight_sum - 1.0) > 0.001:
+    raise ValueError(f"Threat scoring weights must sum to 1.0, got {_weight_sum}")
+
 GROUP_RADIUS_PX: int = 80
 GROUP_MAX_COUNT: int = 3
 
@@ -80,6 +85,7 @@ LRF_SWEEP_ARC_DEG: float = 5.0
 
 NIGHT_START_HOUR: int = 20
 NIGHT_END_HOUR: int = 6
+TIMEZONE_OFFSET_H: int = int(os.environ.get("TIMEZONE_OFFSET_H", "0"))
 
 # ---------------------------------------------------------------------------
 # Motion Control (PID)
@@ -118,6 +124,8 @@ PAN_LIMIT_HARD_STEPS: int = 5000
 TILT_LIMIT_WARN_STEPS: int = 900
 TILT_LIMIT_HARD_STEPS: int = 1000
 STEPS_PER_DEGREE: float = 10.0
+if STEPS_PER_DEGREE <= 0:
+    raise ValueError(f"STEPS_PER_DEGREE must be positive, got {STEPS_PER_DEGREE}")
 
 # ---------------------------------------------------------------------------
 # FSM Dwell Timers
@@ -171,7 +179,15 @@ MQTT_STATUS_TOPIC: str = os.environ.get("MQTT_STATUS_TOPIC", "sentry/status")
 MQTT_COMMAND_TOPIC: str = os.environ.get("MQTT_COMMAND_TOPIC", "sentry/command")
 MQTT_USERNAME: str = os.environ.get("MQTT_USERNAME", "")
 MQTT_PASSWORD: str = os.environ.get("MQTT_PASSWORD", "")
-SENTRY_ID: str = os.environ["SENTRY_ID"]
+MQTT_TLS_VERIFY: bool = os.environ.get("MQTT_TLS_VERIFY", "true").lower() == "true"
+MQTT_CA_CERT: str | None = os.environ.get("MQTT_CA_CERT")
+
+try:
+    SENTRY_ID: str = os.environ["SENTRY_ID"]
+except KeyError:
+    raise SystemExit(
+        "FATAL: SENTRY_ID environment variable is required but not set."
+    )
 COMMAND_SAFETY_TIMEOUT_S: float = float(os.environ.get("COMMAND_SAFETY_TIMEOUT_S", "3.0"))
 COMMAND_RATE_LIMIT_HZ: int = int(os.environ.get("COMMAND_RATE_LIMIT_HZ", "20"))
 
@@ -181,6 +197,7 @@ COMMAND_RATE_LIMIT_HZ: int = int(os.environ.get("COMMAND_RATE_LIMIT_HZ", "20"))
 
 HUD_USERNAME: str = os.environ.get("HUD_USERNAME", "sentry")
 HUD_PASSWORD: str = os.environ.get("HUD_PASSWORD", "changeme")
+HUD_BIND_ADDRESS: str = os.environ.get("HUD_BIND_ADDRESS", "0.0.0.0")
 
 # ---------------------------------------------------------------------------
 # Resilience / Boot Counter

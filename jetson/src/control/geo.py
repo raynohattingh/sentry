@@ -17,13 +17,7 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# Warn at module import if sentry position is not configured.
-if config.SENTRY_LAT == 0.0 and config.SENTRY_LON == 0.0:
-    logger.warning(
-        "[GEO] WARNING: SENTRY_LAT and SENTRY_LON are both 0.0 — "
-        "computed target GPS coordinates will be meaningless. "
-        "Set these values in config.py before field deployment."
-    )
+_geo_position_warned: bool = False
 
 # Earth's mean radius in metres.
 _EARTH_RADIUS_M: float = 6_371_000.0
@@ -58,16 +52,21 @@ def haversine(
 
     angular_dist = distance_m / _EARTH_RADIUS_M
 
-    lat2_r = math.asin(
+    sin_lat2 = (
         math.sin(lat1_r) * math.cos(angular_dist)
         + math.cos(lat1_r) * math.sin(angular_dist) * math.cos(bearing_r)
     )
+    lat2_r = math.asin(max(-1.0, min(1.0, sin_lat2)))
     lon2_r = lon1_r + math.atan2(
         math.sin(bearing_r) * math.sin(angular_dist) * math.cos(lat1_r),
         math.cos(angular_dist) - math.sin(lat1_r) * math.sin(lat2_r),
     )
 
-    return math.degrees(lat2_r), math.degrees(lon2_r)
+    lat2_deg = math.degrees(lat2_r)
+    lon2_deg = math.degrees(lon2_r)
+    # Normalise longitude to [-180, 180].
+    lon2_deg = ((lon2_deg + 180.0) % 360.0) - 180.0
+    return lat2_deg, lon2_deg
 
 
 def bearing_from_pan(pan_steps: int) -> float:
@@ -125,9 +124,17 @@ def compute_target_gps(
     Example:
         >>> lat, lon = compute_target_gps(-26.0, 28.0, 0.0, 100.0)
     """
+    global _geo_position_warned
+    if not _geo_position_warned and sentry_lat == 0.0 and sentry_lon == 0.0:
+        logger.warning(
+            "[GEO] SENTRY_LAT and SENTRY_LON are both 0.0 — "
+            "computed target GPS coordinates will be meaningless."
+        )
+        _geo_position_warned = True
+
     if distance_m is None or distance_m <= 0:
         return None, None  # type: ignore[return-value]
 
-    # Apply sentry heading offset.
-    true_bearing = (azimuth_deg + config.SENTRY_HEADING_DEG) % 360.0
+    # azimuth_deg is already a true-north bearing (caller applies heading offset).
+    true_bearing = azimuth_deg % 360.0
     return haversine(sentry_lat, sentry_lon, true_bearing, distance_m)

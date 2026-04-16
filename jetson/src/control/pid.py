@@ -51,7 +51,8 @@ class PIDController:
 
         self._prev_error: float = 0.0
         self._integral: float = 0.0
-        self._last_time: float = time.time()
+        self._prev_d: float = 0.0
+        self._last_time: float = time.monotonic()
 
     def update(self, error: float) -> float:
         """Compute the PID output for the given error signal.
@@ -63,7 +64,7 @@ class PIDController:
         Returns:
             Signed output value clamped to ``[-max_out, +max_out]``.
         """
-        current_time = time.time()
+        current_time = time.monotonic()
         dt = current_time - self._last_time
 
         # Prevent divide-by-zero when called faster than clock resolution.
@@ -78,9 +79,11 @@ class PIDController:
         self._integral = max(min(self._integral, self.max_integral), -self.max_integral)
         i_term = self.ki * self._integral
 
-        # 3. Derivative term.
+        # 3. Derivative term with low-pass filter.
         delta_error = error - self._prev_error
         d_term = self.kd * (delta_error / dt)
+        d_term = 0.1 * d_term + 0.9 * self._prev_d
+        self._prev_d = d_term
 
         # Compute output and clamp to motor limits.
         output = p_term + i_term + d_term
@@ -100,4 +103,5 @@ class PIDController:
         """
         self._prev_error = 0.0
         self._integral = 0.0
-        self._last_time = time.time()
+        self._prev_d = 0.0
+        self._last_time = time.monotonic()

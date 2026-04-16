@@ -54,12 +54,15 @@ def test_compute_target_gps_valid():
 
 
 def test_heading_offset_applied():
-    """With heading=90, pan=0 should point east."""
+    """With heading=90, pan=0 should point east via pan_tilt_to_azimuth."""
     geo = _get_geo()
     import config
     orig = config.SENTRY_HEADING_DEG
     config.SENTRY_HEADING_DEG = 90.0
-    lat, lon = geo.compute_target_gps(0.0, 0.0, 0.0, 1000.0)
+    # Caller applies heading offset via pan_tilt_to_azimuth, not compute_target_gps.
+    azimuth, _ = geo.pan_tilt_to_azimuth(pan_steps=0, tilt_steps=0,
+                                          heading_offset_deg=config.SENTRY_HEADING_DEG)
+    lat, lon = geo.compute_target_gps(0.0, 0.0, azimuth, 1000.0)
     config.SENTRY_HEADING_DEG = orig
     # Heading 90 means east, so lon should increase
     assert lon > 0.0

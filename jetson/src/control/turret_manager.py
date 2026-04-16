@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 
 import config
-from control.pid import PIDController
 from hardware.arduino_link import ArduinoLink
 from sentry_types import (
     HousingProfile,
@@ -17,12 +16,6 @@ from sentry_types import (
 class TurretManager:
     def __init__(self, hardware: ArduinoLink | None = None):
         self.hardware = hardware or ArduinoLink()
-        self.pan_pid = PIDController(
-            config.PAN_KP, config.PAN_KI, config.PAN_KD, config.PAN_MAX
-        )
-        self.tilt_pid = PIDController(
-            config.TILT_KP, config.TILT_KI, config.TILT_KD, config.TILT_MAX
-        )
         self.refresh_profile_from_config()
 
     def refresh_profile_from_config(self) -> None:
@@ -100,14 +93,32 @@ class TurretManager:
             return 0.0, 0.0
 
         if self._housing_profile != HousingProfile.TEST_BENCH:
+            # Software backstop: hard-clamp velocities for non-test-bench profiles.
+            position = self.hardware.current_position
+            pan_velocity = self._bound_axis(
+                position.pan_steps,
+                pan_velocity,
+                -config.PAN_LIMIT_HARD_STEPS,
+                config.PAN_LIMIT_HARD_STEPS,
+            )
+            tilt_velocity = self._bound_axis(
+                position.tilt_steps,
+                tilt_velocity,
+                -config.TILT_LIMIT_HARD_STEPS,
+                config.TILT_LIMIT_HARD_STEPS,
+            )
             return pan_velocity, tilt_velocity
 
         position = self.hardware.current_position
         bounds = self._soft_bounds
-        assert bounds.pan_min_steps is not None
-        assert bounds.pan_max_steps is not None
-        assert bounds.tilt_min_steps is not None
-        assert bounds.tilt_max_steps is not None
+        if bounds.pan_min_steps is None:
+            raise ValueError("pan_min_steps must not be None for TEST_BENCH profile")
+        if bounds.pan_max_steps is None:
+            raise ValueError("pan_max_steps must not be None for TEST_BENCH profile")
+        if bounds.tilt_min_steps is None:
+            raise ValueError("tilt_min_steps must not be None for TEST_BENCH profile")
+        if bounds.tilt_max_steps is None:
+            raise ValueError("tilt_max_steps must not be None for TEST_BENCH profile")
 
         return (
             self._bound_axis(
@@ -141,29 +152,5 @@ class TurretManager:
         bounded_pan, bounded_tilt = self.apply_motion_bounds(pan_velocity, tilt_velocity)
         self.hardware.send_velocity(bounded_pan, bounded_tilt)
 
-    def track(self, target_data):
-        """
-        Receives target dictionary: {"cx": int, "cy": int, ...}
-        Calculates PID output and moves motors.
-        """
-        if target_data:
-            err_x = target_data["cx"] - config.CENTER_X
-            err_y = target_data["cy"] - config.CENTER_Y
-
-            if abs(err_x) < config.DEAD_ZONE:
-                err_x = 0
-            if abs(err_y) < config.DEAD_ZONE:
-                err_y = 0
-
-            v_pan = self.pan_pid.update(err_x)
-            v_tilt = self.tilt_pid.update(err_y)
-            self.set_velocity(v_pan, v_tilt)
-            return err_x, v_pan
-
-        self.stop()
-        return 0, 0
-
     def stop(self):
         self.set_velocity(0.0, 0.0)
-        self.pan_pid.reset()
-        self.tilt_pid.reset()

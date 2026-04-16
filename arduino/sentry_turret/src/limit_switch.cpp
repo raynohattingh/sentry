@@ -17,10 +17,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 void limitInit(LimitPin& lim, uint8_t pin) {
-    lim.pin         = pin;
-    lim.state       = LimitState::IDLE;
-    lim.candidateMs = 0;
-    lim.triggered   = false;
+    lim.pin          = pin;
+    lim.state        = LimitState::IDLE;
+    lim.candidateMs  = 0;
+    lim.triggered    = false;
+    lim.releaseCount = 0;
     pinMode(lim.pin, INPUT_PULLUP);
 }
 
@@ -47,9 +48,17 @@ void limitTick(LimitPin& lim) {
 
         case LimitState::TRIGGERED:
             if (sample == HIGH) {
-                // Switch released — clear flag and return to idle.
-                lim.triggered = false;
-                lim.state     = LimitState::IDLE;
+                // Require multiple consecutive HIGH samples before releasing
+                // to reject spurious single-sample glitches from vibration.
+                lim.releaseCount++;
+                if (lim.releaseCount >= LIMIT_RELEASE_DEBOUNCE_COUNT) {
+                    lim.triggered    = false;
+                    lim.releaseCount = 0;
+                    lim.state        = LimitState::IDLE;
+                }
+            } else {
+                // Still pressed — reset the release counter.
+                lim.releaseCount = 0;
             }
             break;
     }

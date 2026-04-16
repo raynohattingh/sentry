@@ -14,6 +14,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "config.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Command codes returned by serialProtoParse
@@ -34,7 +35,7 @@ static constexpr int8_t CMD_UNKNOWN = -1;
 
 /** @brief Mutable parser state. Declare one instance globally in the .ino. */
 struct SerialProtoState {
-    char     buf[64];   ///< Line accumulation buffer (SERIAL_LINE_BUF_LEN)
+    char     buf[SERIAL_LINE_BUF_LEN]; ///< Line accumulation buffer
     uint8_t  head;      ///< Write index into buf
     bool     overflow;  ///< True when a line exceeded buf capacity (discarded)
     float    panSpeed;  ///< Parsed pan velocity (valid when CMD_VELOCITY returned)

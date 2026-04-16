@@ -17,6 +17,7 @@ class MjpegViewer extends StatefulWidget {
     required this.username,
     required this.password,
     this.path = '/video',
+    this.useTls = true,
   });
 
   final String host;
@@ -24,6 +25,7 @@ class MjpegViewer extends StatefulWidget {
   final String username;
   final String password;
   final String path;
+  final bool useTls;
 
   @override
   State<MjpegViewer> createState() => _MjpegViewerState();
@@ -51,7 +53,7 @@ class _MjpegViewerState extends State<MjpegViewer> {
     final credentials =
         base64Encode(utf8.encode('${widget.username}:${widget.password}'));
     final uri = Uri(
-      scheme: 'http',
+      scheme: widget.useTls ? 'https' : 'http',
       host: widget.host,
       port: widget.port,
       path: widget.path,

@@ -126,7 +126,7 @@ def main() -> None:
     if args.throttle_kbps:
         print(f"[SIM] Throttle: {args.throttle_kbps} kbps (SC-003 test mode)")
 
-    client = mqtt.Client(client_id=client_id)
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
     client.username_pw_set(args.username, args.password)
 
     if not args.no_tls:

@@ -12,10 +12,12 @@ Performance target: ≥ 20 Hz main loop; ≤ 100 ms frame-to-serial-command late
 
 from __future__ import annotations
 
+import collections
 import datetime
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -67,7 +69,7 @@ def _check_boot_failures() -> None:
         logger.critical(
             "[SYSTEM] %d consecutive boot failures — triggering OS reboot.", failures
         )
-        os.system("sudo reboot")  # noqa: S605
+        subprocess.run(["sudo", "reboot"], check=False)
         sys.exit(1)
 
 
@@ -78,7 +80,7 @@ def _reset_boot_failures() -> None:
 def _increment_boot_failures() -> None:
     state = _read_boot_state()
     state["consecutive_failures"] = state.get("consecutive_failures", 0) + 1
-    state["last_failure_utc"] = datetime.datetime.utcnow().isoformat() + "Z"
+    state["last_failure_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
     _write_boot_state(state)
 
 
@@ -115,37 +117,39 @@ def main() -> None:
         sys.exit(1)
 
     # Control
-    from control.sentry_brain import SentryBrain
-    from control.threat_tracker import ThreatScorer
+    try:
+        from control.sentry_brain import SentryBrain
+        from control.threat_tracker import ThreatScorer
 
-    brain = SentryBrain()
-    scorer = ThreatScorer()
+        brain = SentryBrain()
+        scorer = ThreatScorer()
+    except Exception as exc:
+        logger.critical("[SYSTEM] FATAL — Control subsystem init failed: %s", exc)
+        _increment_boot_failures()
+        sys.exit(1)
 
     # Hardware
-    from hardware.arduino_link import ArduinoLink
+    try:
+        from hardware.arduino_link import ArduinoLink
 
-    link = ArduinoLink()
-    link.connect()
+        link = ArduinoLink()
+        link.connect()
 
-    from control.turret_manager import TurretManager
+        from control.turret_manager import TurretManager
 
-    turret = TurretManager(hardware=link)
-    logger.info(
-        "[SAFETY] Startup profile=%s validation_state=%s motion_allowed=%s",
-        turret.housing_profile.value,
-        turret.validation_state.value,
-        turret.motion_allowed,
-    )
-    if turret.motion_block_reason is not None:
-        logger.warning("[SAFETY] Motion blocked: %s", turret.motion_block_reason)
-
-    # PID controllers (owned here for direct error injection from camera)
-    from control.pid import PIDController
-
-    pan_pid = PIDController(config.PAN_KP, config.PAN_KI, config.PAN_KD, config.PAN_MAX,
-                             config.PID_MAX_INTEGRAL)
-    tilt_pid = PIDController(config.TILT_KP, config.TILT_KI, config.TILT_KD, config.TILT_MAX,
-                              config.PID_MAX_INTEGRAL)
+        turret = TurretManager(hardware=link)
+        logger.info(
+            "[SAFETY] Startup profile=%s validation_state=%s motion_allowed=%s",
+            turret.housing_profile.value,
+            turret.validation_state.value,
+            turret.motion_allowed,
+        )
+        if turret.motion_block_reason is not None:
+            logger.warning("[SAFETY] Motion blocked: %s", turret.motion_block_reason)
+    except Exception as exc:
+        logger.critical("[SYSTEM] FATAL — Hardware subsystem init failed: %s", exc)
+        _increment_boot_failures()
+        sys.exit(1)
 
     # Comms / Telemetry
     from comms.mqtt import MQTTPublisher
@@ -180,10 +184,12 @@ def main() -> None:
     # Control loop
     # ---------------------------------------------------------------------------
     loop_count = 0
-    loop_times: list[float] = []
+    loop_times: collections.deque[float] = collections.deque(maxlen=100)
+    consecutive_errors = 0
 
     try:
         while True:
+          try:
             loop_start = time.monotonic()
 
             # A. Capture frame.
@@ -208,36 +214,28 @@ def main() -> None:
             # E. Get current turret position.
             position = link.current_position
 
-            # F. Compute PID velocities for best target (if any).
-            if targets and brain.state in (FSMState.TRACK, FSMState.ACQUIRE):
-                best_target = max(targets, key=lambda t: t.area)
-                err_x = best_target.centroid[0] - config.CENTER_X
-                err_y = best_target.centroid[1] - config.CENTER_Y
+            # F. Select best target by threat score (not area).
+            best_centroid = None
+            if targets and assessments:
+                best_assessment = max(assessments, key=lambda a: a.threat_score)
+                best_target = next(
+                    (t for t in targets if t.target_id == best_assessment.target_id),
+                    None,
+                )
+                if best_target is not None:
+                    best_centroid = best_target.centroid
 
-                if abs(err_x) < config.DEAD_ZONE:
-                    err_x = 0
-                if abs(err_y) < config.DEAD_ZONE:
-                    err_y = 0
+            # G. FSM update (SentryBrain owns all PID computation).
+            command = brain.update(
+                assessments,
+                position,
+                target_centroid=best_centroid,
+                frame_center=(config.CENTER_X, config.CENTER_Y),
+            )
 
-                v_pan = pan_pid.update(float(err_x))
-                v_tilt = tilt_pid.update(float(err_y))
-            else:
-                pan_pid.reset()
-                tilt_pid.reset()
-                v_pan, v_tilt = 0.0, 0.0
-
-            # G. FSM update (returns scan/search velocities; TRACK/ACQUIRE uses PID above).
-            command = brain.update(assessments, position)
-
-            # Override FSM scan/search velocities with PID when tracking.
-            if brain.state in (FSMState.TRACK, FSMState.ACQUIRE):
-                final_pan = v_pan
-                final_tilt = v_tilt
-                fire_lrf = command.fire_lrf
-            else:
-                final_pan = command.pan_velocity
-                final_tilt = command.tilt_velocity
-                fire_lrf = command.fire_lrf
+            final_pan = command.pan_velocity
+            final_tilt = command.tilt_velocity
+            fire_lrf = command.fire_lrf
 
             # H. Send to Arduino.
             turret.set_velocity(final_pan, final_tilt)
@@ -283,8 +281,6 @@ def main() -> None:
             loop_end = time.monotonic()
             loop_ms = (loop_end - loop_start) * 1000.0
             loop_times.append(loop_end - loop_start)
-            if len(loop_times) > 100:
-                loop_times.pop(0)
 
             loop_count += 1
             if loop_count % 100 == 0:
@@ -297,11 +293,26 @@ def main() -> None:
             if loop_ms > 100:
                 logger.warning("[PERF] WARNING: loop exceeded 100 ms (%.1f ms)", loop_ms)
 
+            consecutive_errors = 0
+
+          except Exception as exc:
+            consecutive_errors += 1
+            logger.exception("[SYSTEM] Main loop error (#%d): %s", consecutive_errors, exc)
+            if consecutive_errors >= 10:
+                logger.critical("[SYSTEM] Too many consecutive errors — exiting.")
+                _increment_boot_failures()
+                break
+            time.sleep(0.1)
+
     except KeyboardInterrupt:
         logger.info("[SYSTEM] Keyboard interrupt — shutting down.")
     finally:
         link.stop()
         camera.stop()
+        try:
+            mqtt_pub.publish_async("")  # flush signal
+        except Exception:
+            pass
         logger.info("[SYSTEM] Sentry Core shutdown complete.")
 
 

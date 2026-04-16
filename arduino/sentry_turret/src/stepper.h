@@ -31,8 +31,8 @@ struct StepperAxis {
     uint8_t       stepPin;           ///< Arduino digital pin number for STEP signal
     uint8_t       dirPin;            ///< Arduino digital pin number for DIR signal
     float         velocity;          ///< Current velocity in caller-defined speed units (negative = reverse)
-    unsigned long stepIntervalUs;    ///< Time between steps in microseconds (derived from velocity)
-    unsigned long nextStepTimeUs;    ///< micros() timestamp of the next scheduled step
+    uint32_t      stepIntervalUs;    ///< Time between steps in microseconds (derived from velocity)
+    uint32_t      nextStepTimeUs;    ///< micros() timestamp of the next scheduled step
     int32_t       stepCount;         ///< Cumulative signed step count (positive = forward)
 };
 
