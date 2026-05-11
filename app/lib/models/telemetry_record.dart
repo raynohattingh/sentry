@@ -6,7 +6,8 @@ enum FsmState {
   scan,
   acquire,
   track,
-  search;
+  search,
+  manualOverride;
 
   static FsmState? fromJson(String? value) {
     if (value == null) return null;
@@ -19,12 +20,17 @@ enum FsmState {
         return FsmState.track;
       case 'SEARCH':
         return FsmState.search;
+      case 'MANUAL_OVERRIDE':
+        return FsmState.manualOverride;
       default:
         return null;
     }
   }
 
-  String toJson() => name.toUpperCase();
+  String toJson() {
+    if (this == FsmState.manualOverride) return 'MANUAL_OVERRIDE';
+    return name.toUpperCase();
+  }
 }
 
 /// 2D velocity vector from the telemetry payload.

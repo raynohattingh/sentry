@@ -133,7 +133,10 @@ def main() -> None:
         from hardware.arduino_link import ArduinoLink
 
         link = ArduinoLink()
-        link.connect()
+        if not link.connect():
+            raise RuntimeError(
+                f"ArduinoLink.connect() returned False (port={config.SERIAL_PORT})"
+            )
 
         from control.turret_manager import TurretManager
 
@@ -152,12 +155,23 @@ def main() -> None:
         sys.exit(1)
 
     # Comms / Telemetry
-    from comms.mqtt import MQTTPublisher
+    from comms.mqtt import CommandSubscriber, MQTTPublisher
     from telemetry.recorder import TelemetryRecorder
 
     mqtt_pub = MQTTPublisher()
     status_pub = MQTTPublisher(topic=config.MQTT_STATUS_TOPIC)
     recorder = TelemetryRecorder(session_id=session_id, mqtt=mqtt_pub)
+
+    # Manual override command subscriber — listens on MQTT_COMMAND_TOPIC,
+    # validates SENTRY_ID, rate-limits, and drives turret directly. The
+    # safety watchdog stops motion if no command arrives within
+    # COMMAND_SAFETY_TIMEOUT_S.
+    command_sub = CommandSubscriber(
+        set_velocity=turret.set_velocity,
+        enter_override=brain.enter_override,
+        exit_override=brain.exit_override,
+    )
+    command_sub.start()
 
     # Web HUD
     from web.streamer import start_web_server, update_stream_frame

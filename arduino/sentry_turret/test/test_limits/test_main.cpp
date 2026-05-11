@@ -118,7 +118,7 @@ void test_bounce_cancelled(void) {
     TEST_ASSERT_FALSE(lim.triggered);
 }
 
-/** Triggered flag clears when pin returns HIGH. */
+/** Triggered flag clears after LIMIT_RELEASE_DEBOUNCE_COUNT consecutive HIGH samples. */
 void test_triggered_clears_on_release(void) {
     LimitPin lim{};
     g_millis = 0;
@@ -131,8 +131,28 @@ void test_triggered_clears_on_release(void) {
     TEST_ASSERT_TRUE(lim.triggered);
 
     setHigh(9);
-    limitTick(lim);
+    for (uint8_t i = 0; i < LIMIT_RELEASE_DEBOUNCE_COUNT; ++i) {
+        limitTick(lim);
+    }
     TEST_ASSERT_FALSE(lim.triggered);
+}
+
+/** Single HIGH sample is not enough to clear triggered (rejects glitches). */
+void test_single_high_does_not_release(void) {
+    LimitPin lim{};
+    g_millis = 0;
+    limitInit(lim, 9);
+    setLow(9);
+    for (unsigned int i = 0; i <= LIMIT_DEBOUNCE_MS; ++i) {
+        advanceMs(1);
+        limitTick(lim);
+    }
+    TEST_ASSERT_TRUE(lim.triggered);
+
+    setHigh(9);
+    limitTick(lim);
+    // One HIGH sample is below LIMIT_RELEASE_DEBOUNCE_COUNT — must stay triggered.
+    TEST_ASSERT_TRUE(lim.triggered);
 }
 
 /** Consecutive triggers: state machine resets correctly after release. */
@@ -149,9 +169,11 @@ void test_consecutive_triggers(void) {
     }
     TEST_ASSERT_TRUE(lim.triggered);
 
-    // Release
+    // Release: requires LIMIT_RELEASE_DEBOUNCE_COUNT consecutive HIGH samples.
     setHigh(9);
-    limitTick(lim);
+    for (uint8_t i = 0; i < LIMIT_RELEASE_DEBOUNCE_COUNT; ++i) {
+        limitTick(lim);
+    }
     TEST_ASSERT_FALSE(lim.triggered);
 
     // Second trigger
@@ -174,6 +196,7 @@ int main(void) {
     RUN_TEST(test_trigger_after_debounce);
     RUN_TEST(test_bounce_cancelled);
     RUN_TEST(test_triggered_clears_on_release);
+    RUN_TEST(test_single_high_does_not_release);
     RUN_TEST(test_consecutive_triggers);
     return UNITY_END();
 }

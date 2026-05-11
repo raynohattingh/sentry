@@ -44,6 +44,8 @@ class SentryModeBadge extends ConsumerWidget {
         return ('TRACK', const Color(0xFFFFAA00) /* kColorAmber */); // amber
       case FsmState.search:
         return ('SEARCH', kColorHigh);
+      case FsmState.manualOverride:
+        return ('MANUAL', kColorHigh);
       case null:
         return ('—', kColorOffline);
     }

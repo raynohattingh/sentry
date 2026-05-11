@@ -30,6 +30,7 @@ class MqttServiceImpl implements MqttService {
   MqttServiceImpl();
 
   MqttServerClient? _client;
+  StreamSubscription<List<MqttReceivedMessage<MqttMessage>>>? _updatesSub;
   SentryConfig? _config;
 
   final _telemetryController =
@@ -63,6 +64,23 @@ class MqttServiceImpl implements MqttService {
   }
 
   Future<void> _doConnect(SentryConfig config) async {
+    // Tear down any previous client before reconnecting so its
+    // onDisconnected callback can't keep scheduling fresh reconnects
+    // behind our back, and so the previous updates subscription is
+    // cancelled (mqtt_client's updates stream is unbounded per-client).
+    _updatesSub?.cancel();
+    _updatesSub = null;
+    final previous = _client;
+    if (previous != null) {
+      previous.onDisconnected = null;
+      try {
+        previous.disconnect();
+      } catch (_) {
+        // ignore — best-effort cleanup of stale client
+      }
+      _client = null;
+    }
+
     try {
       final clientId =
           'sentry_mobile_${DateTime.now().millisecondsSinceEpoch}';
@@ -94,7 +112,7 @@ class MqttServiceImpl implements MqttService {
         _backoffSec = 2;
         client.subscribe(mqttTelemetryTopic, MqttQos.atLeastOnce);
         client.subscribe(mqttStatusTopic, MqttQos.atLeastOnce);
-        client.updates?.listen(_onMessage);
+        _updatesSub = client.updates?.listen(_onMessage);
         _connectionController.add(SentryConnectionState.online);
       } else {
         _scheduleReconnect();
@@ -167,6 +185,9 @@ class MqttServiceImpl implements MqttService {
   Future<void> disconnect() async {
     _disposed = true;
     _reconnectTimer?.cancel();
+    await _updatesSub?.cancel();
+    _updatesSub = null;
+    _client?.onDisconnected = null;
     _client?.disconnect();
     _client = null;
     await _telemetryController.close();

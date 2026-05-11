@@ -79,7 +79,7 @@ class TurretManager:
             motion_allowed=self.motion_allowed,
             motion_block_reason=self.motion_block_reason,
             validated_switches=validated_switches,
-            timestamp_utc=datetime.datetime.now(datetime.UTC)
+            timestamp_utc=datetime.datetime.now(datetime.timezone.utc)
             .isoformat()
             .replace("+00:00", "Z"),
         )

@@ -73,11 +73,8 @@ class _MjpegViewerState extends State<MjpegViewer> {
         return;
       }
 
-      _streamSub = response.stream
-          .toBytes()
-          .asStream()
-          .listen(null); // Simplified — full MJPEG parsing below
-
+      // ByteStream is single-subscription; _parseMultipart owns the listener
+      // and stores it as _streamSub so dispose() can cancel it.
       _parseMultipart(response);
     }).catchError((Object e) {
       if (e is SocketException) {
@@ -92,7 +89,7 @@ class _MjpegViewerState extends State<MjpegViewer> {
     final boundary = _extractBoundary(response.headers['content-type'] ?? '');
     final buffer = <int>[];
 
-    response.stream.listen(
+    _streamSub = response.stream.listen(
       (chunk) {
         _resetStallTimer();
         buffer.addAll(chunk);

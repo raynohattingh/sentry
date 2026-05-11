@@ -7,9 +7,9 @@ a heartbeat watchdog, and a full reconnect loop.
 Serial protocol:
     Send:    ``V {pan:.2f} {tilt:.2f}\\n``  (velocity command)
              ``L\\n``                         (fire LRF)
-             ``E {0|1}\\n``                   (motor enable)
     Receive: ``POS <pan_steps> <tilt_steps>`` (position feedback)
-             ``DIST <float>``                  (LRF distance in metres)
+             ``DIST <float>``                  (LRF distance in metres;
+                                                negative = error sentinel)
 """
 
 from __future__ import annotations
@@ -75,7 +75,6 @@ class ArduinoLink:
             if isinstance(self._serial, SerialPort):
                 self._serial.open(config.SERIAL_PORT, config.BAUD_RATE)
             time.sleep(0.5)  # brief settle time
-            self.send_enable(True)
             logger.info("[SERIAL] Connected to %s.", config.SERIAL_PORT)
             self._running = True
             self._start_read_thread()
@@ -157,21 +156,6 @@ class ArduinoLink:
                 self._serial.write(b"L\n")
             except Exception as exc:
                 logger.error("[SERIAL] LRF trigger failed: %s", exc)
-
-    def send_enable(self, state: bool) -> None:
-        """Enable or disable the motor drivers.
-
-        Args:
-            state: True to enable motors, False to disable.
-        """
-        if not self._serial.is_connected:
-            return
-        val = 1 if state else 0
-        with self._lock:
-            try:
-                self._serial.write(f"E {val}\n".encode())
-            except Exception:
-                pass
 
     # ------------------------------------------------------------------
     # Reconnect logic

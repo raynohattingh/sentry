@@ -21,8 +21,10 @@ from sentry_types import LRFReading, LimitAxis, LimitDirection, LimitEvent, Turr
 logger = logging.getLogger(__name__)
 
 # Pre-compiled regex for valid serial frames.
+# The DIST branch accepts a leading minus so the Arduino's documented
+# `DIST -1.0` error frame is parsed (signals checksum failure / timeout).
 _FRAME_RE = re.compile(
-    r"^(DIST \d+(\.\d+)?|POS -?\d+ -?\d+|LIMIT PAN (LEFT|RIGHT)|LIMIT TILT (UP|DOWN))$"
+    r"^(DIST -?\d+(\.\d+)?|POS -?\d+ -?\d+|LIMIT PAN (LEFT|RIGHT)|LIMIT TILT (UP|DOWN))$"
 )
 
 
@@ -52,7 +54,12 @@ def parse_frame(line: str) -> LRFReading | LimitEvent | TurretPosition | None:
     if _FRAME_RE.match(line):
         if line.startswith("DIST"):
             _, val = line.split()
-            return LRFReading(distance_m=float(val), valid=True, received_utc=now)
+            distance = float(val)
+            # Negative distance is the Arduino's documented error sentinel
+            # (checksum failure or measurement timeout — see sentry_turret.ino).
+            if distance < 0.0:
+                return LRFReading(distance_m=None, valid=False, received_utc=now)
+            return LRFReading(distance_m=distance, valid=True, received_utc=now)
         if line.startswith("POS"):
             _, pan, tilt = line.split()
             return TurretPosition(pan_steps=int(pan), tilt_steps=int(tilt), received_utc=now)

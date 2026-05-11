@@ -146,13 +146,23 @@ class ThreadedCamera:
                                    config.CAMERA_RETRY_INTERVAL_S)
                     if self._cap:
                         self._cap.release()
+                    # Drop the released capture so the read-loop short-circuits
+                    # via the `_cap is None` guard until reconnect succeeds.
+                    self._cap = None
                     time.sleep(config.CAMERA_RETRY_INTERVAL_S)
                     try:
                         self._open_capture()
                         self._fault_count = 0
                         logger.info("[CAMERA] Reconnected — resuming pipeline.")
-                    except RuntimeError:
-                        pass
+                    except RuntimeError as exc:
+                        # _open_capture failed; reset counter so we don't
+                        # busy-loop with no log output, and keep _cap None
+                        # so the top-of-loop guard sleeps instead of reading
+                        # from a released capture.
+                        logger.warning(
+                            "[CAMERA] Reconnect failed (%s) — will retry.", exc
+                        )
+                        self._fault_count = 0
                 else:
                     time.sleep(0.01)
 

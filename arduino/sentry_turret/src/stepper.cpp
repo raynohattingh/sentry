@@ -86,7 +86,9 @@ void stepperTick(StepperAxis& axis) {
 
     // Emit STEP pulse with guaranteed minimum 1 µs HIGH duration.
     digitalWrite(axis.stepPin, HIGH);
+#ifndef NATIVE_ENV
     delayMicroseconds(2);
+#endif
     digitalWrite(axis.stepPin, LOW);
 
     // Update signed step count with INT32 overflow guard (FR-022).

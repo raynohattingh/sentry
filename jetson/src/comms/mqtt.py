@@ -152,20 +152,23 @@ class MQTTPublisher:
         time.sleep(1.0)
 
     def _drain(self) -> None:
-        """Drain the queue and publish messages to the broker."""
+        """Drain the queue and publish messages to the broker.
+
+        Raises ConnectionError when the broker disconnects so the outer
+        ``_run`` loop re-enters ``_connect`` instead of silently looping
+        forever with stale messages re-queued.
+        """
         while True:
+            if not self._connected or self._client is None:
+                # Disconnected — re-queue any in-flight payload and surface
+                # to _run so it can rebuild the client. Without this the
+                # publisher silently stops forever after the first drop
+                # (the paho keepalive disconnect leaves _client non-null
+                # but useless).
+                raise ConnectionError("MQTT not connected")
             try:
                 payload = self._queue.get(timeout=1.0)
-                if self._connected and self._client:
-                    self._client.publish(self.topic, payload)
-                else:
-                    # Not connected — wait before retrying (avoid busy-loop).
-                    time.sleep(5.0)
-                    # Re-queue for next attempt.
-                    try:
-                        self._queue.put_nowait(payload)
-                    except queue.Full:
-                        pass
+                self._client.publish(self.topic, payload)
             except queue.Empty:
                 continue
             except Exception as exc:

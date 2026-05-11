@@ -150,6 +150,7 @@ class TelemetryRecorder:
             }
 
         return TelemetryRecord(
+            sentry_id=config.SENTRY_ID,
             session_id=self.session_id,
             target_id=target.target_id,
             threat_score=assessment.threat_score,

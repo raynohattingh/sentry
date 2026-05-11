@@ -76,7 +76,12 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _saving = true);
     try {
-      final config = SentryConfig(
+      // Preserve calibration/retention/GPS fields that this screen doesn't
+      // edit. Building a fresh SentryConfig() here would reset sentryLat,
+      // sentryLon, northOffsetDegrees and retentionDays every time the user
+      // re-opens "Re-configure Broker" from Settings.
+      final current = ref.read(sentryConfigProvider);
+      final config = current.copyWith(
         brokerHost: _brokerHostCtrl.text.trim(),
         brokerPort:
             int.tryParse(_brokerPortCtrl.text.trim()) ?? kDefaultMqttPort,

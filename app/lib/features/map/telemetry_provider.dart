@@ -32,13 +32,25 @@ final mqttServiceProvider = Provider<MqttService>((ref) {
   return service;
 });
 
-/// Provider for the location service.
-final locationServiceProvider = Provider<LocationService?>((ref) => null);
+/// Provider for the location service. Defaults to the real geolocator-backed
+/// implementation; tests override with a mock. Disposed with the container.
+final locationServiceProvider = Provider<LocationService?>((ref) {
+  final service = LocationServiceImpl();
+  ref.onDispose(service.dispose);
+  return service;
+});
 
-/// Provider for the current sentry config (north offset).
+/// Provider for the current sentry config (north offset, GPS, retention).
+/// Reads from the canonical [sentryConfigProvider] so calibration is applied.
 final sentryConfigForMapProvider = Provider<SentryConfig>((ref) {
-  // Forward-declared — overridden in main.dart / MapScreen
-  return const SentryConfig();
+  return ref.watch(sentryConfigProvider);
+});
+
+/// Stream provider for the user's current location.
+final userLocationStreamProvider = StreamProvider<LatLng?>((ref) {
+  final service = ref.watch(locationServiceProvider);
+  if (service == null) return const Stream.empty();
+  return service.locationStream;
 });
 
 /// Stream provider for raw telemetry records.
@@ -60,8 +72,10 @@ class ThreatMarkersNotifier
     this._mqttService,
     LatLng? initialUserLocation, {
     SentryConfig config = const SentryConfig(),
+    Ref? ref,
   })  : _userLocation = initialUserLocation,
         _config = config,
+        _ref = ref,
         super({}) {
     _telemetrySub =
         _mqttService.telemetryStream.listen(_onTelemetry);
@@ -72,6 +86,7 @@ class ThreatMarkersNotifier
   final MqttService _mqttService;
   LatLng? _userLocation;
   final SentryConfig _config;
+  final Ref? _ref;
 
   StreamSubscription<TelemetryRecord>? _telemetrySub;
   StreamSubscription<SentryConnectionState>? _connectionSub;
@@ -92,6 +107,12 @@ class ThreatMarkersNotifier
   }
 
   void _onTelemetry(TelemetryRecord record) {
+    // Always reflect the latest FSM state on the badge, even when the record
+    // has no GPS (e.g. before any LRF lock or during MANUAL_OVERRIDE).
+    if (_ref != null && record.fsmState != null) {
+      _ref.read(sentryModeProvider.notifier).state = record.fsmState;
+    }
+
     if (record.lat == null || record.lon == null) return;
 
     // Apply north offset calibration (FR-021)
@@ -192,16 +213,18 @@ final threatMarkersProvider =
   (ref) {
     final mqtt = ref.watch(mqttServiceProvider);
     final config = ref.watch(sentryConfigForMapProvider);
-    return ThreatMarkersNotifier(mqtt, null, config: config);
+    // Eagerly subscribe to user location and feed it into the notifier so
+    // marker distances and the blue-dot stay live. Without this the
+    // distance/blue-dot remained null even when location was available.
+    final notifier =
+        ThreatMarkersNotifier(mqtt, null, config: config, ref: ref);
+    ref.listen<AsyncValue<LatLng?>>(userLocationStreamProvider, (_, next) {
+      next.whenData(notifier.updateUserLocation);
+    }, fireImmediately: true);
+    return notifier;
   },
 );
 
-/// Provider tracking the current sentry FSM state.
+/// Provider tracking the current sentry FSM state. Written to by
+/// [ThreatMarkersNotifier] on every telemetry record.
 final sentryModeProvider = StateProvider<FsmState?>((ref) => null);
-
-/// Wires the FSM state from telemetry (call from MapScreen init).
-void updateSentryMode(Ref ref, TelemetryRecord record) {
-  if (record.fsmState != null) {
-    ref.read(sentryModeProvider.notifier).state = record.fsmState;
-  }
-}

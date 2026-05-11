@@ -324,6 +324,8 @@ class TelemetryRecord:
     """A single telemetry snapshot serialised to JSON-lines and MQTT.
 
     Attributes:
+        sentry_id: Identity key for the emitting sentry; used by clients to
+            filter multi-sentry traffic on a shared broker.
         session_id: UUID4 generated once at process startup; immutable.
         target_id: From TrackedTarget.
         threat_score: From ThreatAssessment.
@@ -336,6 +338,7 @@ class TelemetryRecord:
         timestamp_utc: ISO 8601 UTC at record creation.
     """
 
+    sentry_id: str
     session_id: str
     target_id: int
     threat_score: float

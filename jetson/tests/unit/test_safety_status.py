@@ -13,7 +13,7 @@ class _HardwareStub:
         self.current_position = TurretPosition(
             pan_steps=0,
             tilt_steps=0,
-            received_utc=datetime.datetime.now(datetime.UTC)
+            received_utc=datetime.datetime.now(datetime.timezone.utc)
             .isoformat()
             .replace("+00:00", "Z"),
         )

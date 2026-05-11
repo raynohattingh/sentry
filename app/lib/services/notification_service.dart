@@ -25,6 +25,14 @@ class NotificationServiceImpl implements NotificationService {
   static const _channelDesc =
       'Critical threat detection alerts from Farm Sentry';
 
+  // Telemetry arrives at ~20 Hz; without de-duplication a single active HIGH
+  // target produces ~20 push notifications per second. Track the last
+  // notified (tier, time) per target_id so we only surface meaningful
+  // transitions and at most one notification per target per window.
+  static const Duration _kRepeatSuppress = Duration(seconds: 30);
+  final Map<int, ThreatTier> _lastNotifiedTier = {};
+  final Map<int, DateTime> _lastNotifiedAt = {};
+
   int _notifId = 0;
 
   @override
@@ -64,6 +72,18 @@ class NotificationServiceImpl implements NotificationService {
   Future<void> showThreatAlert(
       TelemetryRecord record, NotificationPreferences prefs) async {
     if (!prefs.shouldNotify(record.tier, record.threatScore)) return;
+
+    // Rate limit: notify on tier transitions and at most once per
+    // [_kRepeatSuppress] for the same target+tier.
+    final now = DateTime.now();
+    final lastTier = _lastNotifiedTier[record.targetId];
+    final lastAt = _lastNotifiedAt[record.targetId];
+    final tierUnchanged = lastTier == record.tier;
+    final withinWindow =
+        lastAt != null && now.difference(lastAt) < _kRepeatSuppress;
+    if (tierUnchanged && withinWindow) return;
+    _lastNotifiedTier[record.targetId] = record.tier;
+    _lastNotifiedAt[record.targetId] = now;
 
     final isAlarm = prefs.highMode == NotificationMode.alarm &&
         record.tier == ThreatTier.high;

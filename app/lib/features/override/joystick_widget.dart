@@ -46,8 +46,12 @@ class _JoystickWidgetState extends State<JoystickWidget> {
   void _emitCommand(Offset offset) {
     final panVelocity = (offset.dx / _kJoystickRadius * kMaxJoystickVelocity)
         .clamp(-kMaxJoystickVelocity, kMaxJoystickVelocity);
+    // Flutter `dy` is positive going DOWN on screen, but the Jetson/Arduino
+    // convention is tilt_velocity positive = UP (sentry_types.py
+    // TurretCommand, arduino config.h TILT_DIR_PIN). Negate so dragging
+    // the nub up aims the turret up.
     final tiltVelocity =
-        (offset.dy / _kJoystickRadius * kMaxJoystickVelocity)
+        (-offset.dy / _kJoystickRadius * kMaxJoystickVelocity)
             .clamp(-kMaxJoystickVelocity, kMaxJoystickVelocity);
 
     widget.onCommandChanged(ManualCommand(
