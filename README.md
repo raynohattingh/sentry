@@ -339,6 +339,7 @@ All values in `config.py` can be overridden with environment variables. See `jet
 
 ```json
 {
+  "sentry_id": "my-sentry-001",
   "session_id": "uuid4",
   "target_id": 1,
   "threat_score": 87.3,
@@ -353,6 +354,8 @@ All values in `config.py` can be overridden with environment variables. See `jet
   "fsm_state": "ACQUIRE"
 }
 ```
+
+The `sentry_id` field enables multi-sentry deployments: the app filters incoming telemetry by `sentry_id` so a single broker can serve multiple turrets simultaneously.
 
 **`sentry/command`** (App -> Jetson) -- joystick commands at up to 10 Hz:
 
@@ -428,6 +431,12 @@ Upward transitions (SCAN -> ACQUIRE) are immediate. Downward transitions require
 | Grouping (nearby targets) | 20% | More targets nearby = higher |
 | Time of day | 10% | Night hours (20:00-06:00) = bonus |
 
+### Alert Log and Notifications
+
+The alert log in the **Alerts** screen stores only tier-transition events (e.g. LOW → MED, MED → HIGH). Repeated telemetry records for the same target at the same tier are not persisted, keeping the SQLite file small at 20 Hz. Entries older than the configured retention period (default 7 days, configurable in Settings) are purged at startup.
+
+Push notifications follow the same transition logic and additionally suppress re-notification for the same target+tier for 30 seconds. HIGH-tier alerts use the alarm audio channel on Android and critical notifications on iOS so they break through Do Not Disturb.
+
 ---
 
 ## Running Tests
@@ -464,6 +473,8 @@ cd app && flutter test
 **App shows "Sentry Offline"** -- No telemetry received in 10 seconds. Check: Jetson is running, `SENTRY_ID` matches between app and Jetson, broker is reachable from the phone's network.
 
 **Joystick has no effect** -- Verify `[CMD] CommandSubscriber started` in Jetson logs and that the app's Sentry ID matches the Jetson's `SENTRY_ID` exactly.
+
+**Setup screen resets calibration/GPS fields** -- Re-entering broker credentials via Settings -> Re-configure now preserves `sentryLat`, `sentryLon`, `northOffsetDegrees`, and `retentionDays` from the previous save. Only the fields shown on screen are overwritten.
 
 **HUD password warning in logs** -- Change `HUD_PASSWORD` from the default `changeme` before deployment.
 
