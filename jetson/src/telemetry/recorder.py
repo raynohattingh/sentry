@@ -16,6 +16,7 @@ import logging
 import logging.handlers
 import math
 import os
+import time
 
 import config
 from comms.mqtt import MQTTProtocol
@@ -100,8 +101,11 @@ class TelemetryRecorder:
         handler.setFormatter(logging.Formatter("%(message)s"))
         self._jsonl_logger.addHandler(handler)
 
-        logger.info("[TELEMETRY] Recorder initialised; session=%s log=%s",
-                    session_id, log_path)
+        self._mqtt_interval_s: float = 1.0 / max(1, config.TELEMETRY_MQTT_HZ)
+        self._last_mqtt_publish: float = 0.0
+
+        logger.info("[TELEMETRY] Recorder initialised; session=%s log=%s mqtt_hz=%d",
+                    session_id, log_path, config.TELEMETRY_MQTT_HZ)
 
     def record(
         self,
@@ -177,7 +181,10 @@ class TelemetryRecorder:
             logger.error("[TELEMETRY] JSON serialization failed (nan/inf?): %s", exc)
             return
         self._jsonl_logger.info(payload)
-        try:
-            self._mqtt.publish_async(payload)
-        except Exception as exc:
-            logger.warning("[TELEMETRY] MQTT publish failed (non-fatal): %s", exc)
+        now = time.monotonic()
+        if now - self._last_mqtt_publish >= self._mqtt_interval_s:
+            self._last_mqtt_publish = now
+            try:
+                self._mqtt.publish_async(payload)
+            except Exception as exc:
+                logger.warning("[TELEMETRY] MQTT publish failed (non-fatal): %s", exc)

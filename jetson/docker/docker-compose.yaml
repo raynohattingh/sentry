@@ -7,14 +7,15 @@ services:
     
     # CRITICAL: Enables GPU Access
     runtime: nvidia
-    
+
     # Restart Policy: If it crashes, bring it back up
     restart: unless-stopped
-    
-    # Network: Expose the Flask stream
-    ports:
-      - "5000:5000"
-    
+
+    # Share the host network so the container can reach the MQTT broker
+    # running on the same machine (192.168.1.100 is the host's own LAN IP).
+    # Flask HUD on port 5000 is still accessible on the host without port mapping.
+    network_mode: host
+
     # Hardware Access
     cap_add:
       - SYS_RAWIO
@@ -27,18 +28,24 @@ services:
       - ../src:/app/src
       - sentry_state:/app/state
       - sentry_logs:/app/logs
+      - /etc/mosquitto/certs/ca.crt:/etc/mosquitto/certs/ca.crt:ro
 
     # Environment Config
     environment:
       - SENTRY_ID=${SENTRY_ID:-my-sentry-001}
       - SERIAL_PORT=/dev/ttyUSB0
       - FLASK_ENV=development
-      - MQTT_BROKER=localhost
-      - MQTT_PORT=8883
+      - MQTT_BROKER=${MQTT_BROKER:-localhost}
+      - MQTT_PORT=${MQTT_PORT:-8883}
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
       - MQTT_TOPIC=sentry/telemetry
       - MQTT_STATUS_TOPIC=${MQTT_STATUS_TOPIC:-sentry/status}
       - HUD_USERNAME=${HUD_USERNAME:?Set HUD_USERNAME in .env}
       - HUD_PASSWORD=${HUD_PASSWORD:?Set HUD_PASSWORD in .env}
+      - MODEL_PATH=${MODEL_PATH:-yolov8n.engine}
+      - MQTT_CA_CERT=${MQTT_CA_CERT:-}
+      - TELEMETRY_MQTT_HZ=${TELEMETRY_MQTT_HZ:-5}
       - HOUSING_PROFILE=${HOUSING_PROFILE:-MVP}
       - TEST_BENCH_PAN_MIN_STEPS=${TEST_BENCH_PAN_MIN_STEPS:-}
       - TEST_BENCH_PAN_MAX_STEPS=${TEST_BENCH_PAN_MAX_STEPS:-}

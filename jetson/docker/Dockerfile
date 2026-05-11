@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     usbutils \
     libgl1 \
     libglib2.0-0 \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Set Working Directory
@@ -26,15 +27,21 @@ COPY src/ /app/src/
 # 5. Create runtime directories
 RUN mkdir -p /app/state /app/logs
 
-# 5a. Create non-root user and set ownership
-RUN useradd -m -s /bin/bash sentry && chown -R sentry:sentry /app
-USER sentry
+# 5a. Create non-root user; add to video (GID 44) for /dev/video0 access
+RUN useradd -m -s /bin/bash sentry && \
+    usermod -aG video sentry && \
+    chown -R sentry:sentry /app
+
+# 5b. Entrypoint: fixes volume permissions at runtime then drops to sentry
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # 6. Env Variables
 # Python output buffering off (so you see logs instantly)
 ENV PYTHONUNBUFFERED=1
 
 # 7. Default Command
-# We run python from the src directory
+# Entrypoint runs as root, fixes /app/state + /app/logs ownership, then execs as sentry
 WORKDIR /app/src
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python3", "main.py"]

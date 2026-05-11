@@ -62,6 +62,10 @@ def _write_boot_state(state: dict) -> None:
         json.dump(state, f)
 
 
+def _is_containerized() -> bool:
+    return os.path.exists("/.dockerenv")
+
+
 def _check_boot_failures() -> None:
     state = _read_boot_state()
     failures = state.get("consecutive_failures", 0)
@@ -69,7 +73,10 @@ def _check_boot_failures() -> None:
         logger.critical(
             "[SYSTEM] %d consecutive boot failures — triggering OS reboot.", failures
         )
-        subprocess.run(["sudo", "reboot"], check=False)
+        # In a container Docker's restart policy handles recovery; reboot the
+        # host only when running on bare metal.
+        if not _is_containerized():
+            subprocess.run(["sudo", "reboot"], check=False)
         sys.exit(1)
 
 

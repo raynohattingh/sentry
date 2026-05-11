@@ -96,7 +96,7 @@ CAMERA_HFOV_DEG:
 # ---------------------------------------------------------------------------
 MODEL_PATH:
   type: str
-  default: yolov8n.engine
+  default: yolov8n.pt
   description: Path to YOLOv8 model (.pt for dev, .engine for TRT production)
 
 CONF_THRESHOLD:

@@ -167,6 +167,9 @@ SENTRY_HEADING_DEG: float = 0.0  # degrees from true north at pan=0
 TELEMETRY_LOG_PATH: str = os.environ.get("TELEMETRY_LOG_PATH", "/app/logs/telemetry.jsonl")
 TELEMETRY_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
 TELEMETRY_BACKUP_COUNT: int = 5
+# MQTT publish rate is capped independently of the main-loop rate to prevent
+# queue overflow when the broker is slow or temporarily unreachable.
+TELEMETRY_MQTT_HZ: int = int(os.environ.get("TELEMETRY_MQTT_HZ", "5"))
 
 # ---------------------------------------------------------------------------
 # MQTT

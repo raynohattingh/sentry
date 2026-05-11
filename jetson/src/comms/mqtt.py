@@ -241,33 +241,54 @@ class CommandSubscriber:
         self._running = False
 
     def start(self) -> None:
-        """Connect to the broker and start the subscriber loop."""
-        try:
-            import paho.mqtt.client as mqtt  # type: ignore[import]
-        except ImportError:
-            logger.error("[CMD] paho-mqtt not installed — CommandSubscriber disabled.")
-            return
+        """Start the subscriber in a daemon thread. Returns immediately."""
+        threading.Thread(target=self._run, daemon=True, name="cmd-sub").start()
 
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        client.on_connect = self._on_connect
-        client.on_message = self._on_message
-        if config.MQTT_USERNAME:
-            client.username_pw_set(config.MQTT_USERNAME, config.MQTT_PASSWORD)
-        if config.MQTT_TLS_VERIFY:
-            client.tls_set(ca_certs=config.MQTT_CA_CERT,
-                           cert_reqs=ssl.CERT_REQUIRED,
-                           tls_version=ssl.PROTOCOL_TLS_CLIENT)
-        else:
-            logger.warning("[CMD] TLS verification DISABLED — vulnerable to MITM.")
-            client.tls_set(ca_certs=None, cert_reqs=ssl.CERT_NONE,
-                           tls_version=ssl.PROTOCOL_TLS_CLIENT)
-            client.tls_insecure_set(True)
-        client.connect(self.broker, self.port, keepalive=60)
-        self._client = client
-        self._running = True
-        self._watchdog_thread.start()
-        client.loop_start()
-        logger.info("[CMD] CommandSubscriber started; topic=%s", config.MQTT_COMMAND_TOPIC)
+    def _run(self) -> None:
+        """Daemon thread: connect with exponential backoff until success."""
+        backoff = 1.0
+        while True:
+            try:
+                import paho.mqtt.client as mqtt  # type: ignore[import]
+            except ImportError:
+                logger.error("[CMD] paho-mqtt not installed — CommandSubscriber disabled.")
+                return
+
+            try:
+                if self._client is not None:
+                    try:
+                        self._client.loop_stop()
+                        self._client.disconnect()
+                    except Exception:
+                        pass
+                    self._client = None
+
+                client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+                client.on_connect = self._on_connect
+                client.on_message = self._on_message
+                if config.MQTT_USERNAME:
+                    client.username_pw_set(config.MQTT_USERNAME, config.MQTT_PASSWORD)
+                if config.MQTT_TLS_VERIFY:
+                    client.tls_set(ca_certs=config.MQTT_CA_CERT,
+                                   cert_reqs=ssl.CERT_REQUIRED,
+                                   tls_version=ssl.PROTOCOL_TLS_CLIENT)
+                else:
+                    logger.warning("[CMD] TLS verification DISABLED — vulnerable to MITM.")
+                    client.tls_set(ca_certs=None, cert_reqs=ssl.CERT_NONE,
+                                   tls_version=ssl.PROTOCOL_TLS_CLIENT)
+                    client.tls_insecure_set(True)
+                client.connect(self.broker, self.port, keepalive=60)
+                self._client = client
+                if not self._running:
+                    self._running = True
+                    self._watchdog_thread.start()
+                client.loop_start()
+                logger.info("[CMD] CommandSubscriber connected; topic=%s", config.MQTT_COMMAND_TOPIC)
+                return  # paho loop_start() handles reconnects from here
+            except Exception as exc:
+                logger.warning("[CMD] Connection failed: %s — retry in %.0fs.", exc, backoff)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
 
     def _on_connect(self, client, userdata, flags, rc) -> None:
         if rc == 0:
